@@ -1,140 +1,140 @@
-# Hantek DSO2D15 Desktop Client — Design Spec
+# Десктоп-клиент Hantek DSO2D15 — дизайн-spec
 
-**Date:** 2026-06-26
-**Status:** Draft for review
-**Frozen reference:** [`docs/scpi-command-reference.md`](../../scpi-command-reference.md) — full SCPI registry (~189 commands) extracted verbatim from the *DSO2000 Series SCPI Programmers Manual* (61 pp). Commands come from there; we do not invent them.
-
----
-
-## 1. Goal & scope
-
-A full-featured Windows desktop client for the **Hantek DSO2D15** oscilloscope, written from scratch, talking to the instrument over **USB (USBTMC) via standard VISA**. It replaces the capricious vendor software and exposes every capability documented in the programming manual — no artificial command restrictions.
-
-**In scope (v1 target = entire manual surface):**
-- Real-time dual-channel waveform display.
-- Full control of every SCPI subsystem: vertical (channel), horizontal (timebase), acquire, trigger (incl. all bus-decode trigger types), math/FFT, measure, cursor, display, mask (pass/fail), system, and the built-in **DDS function generator**.
-- Waveform capture to file: CSV, NumPy (`.npy`/`.npz`), HDF5.
-- "Screenshot" = render of our own waveform view to PNG (the SCPI set has **no** screen-grab command — see §10).
-- Preset save/load (our JSON as primary, `SETUp:ALL?` raw snapshot as bonus).
-- Sweep / multi-capture for measurement series.
-- SCPI terminal for direct command entry and debugging.
-
-**Out of scope (v1):** reverse-engineering an undocumented instrument-screen protocol; multi-instrument orchestration; remote/network operation.
-
-**Implementation reality:** although the *spec* covers the whole manual, the build proceeds in layered iterations, each verified on real hardware before moving on (per the agreed process).
+**Дата:** 2026-06-26
+**Статус:** Черновик на ревью
+**Frozen reference:** [`docs/scpi-command-reference.md`](../../scpi-command-reference.md) — полный реестр SCPI (~189 команд), извлечённый дословно из *DSO2000 Series SCPI Programmers Manual* (61 стр.). Команды берём оттуда, не выдумываем.
 
 ---
 
-## 2. Target environment
+## 1. Цель и объём
+
+Полнофункциональный десктоп-клиент под Windows для осциллографа **Hantek DSO2D15**, написанный с нуля, работающий с прибором по **USB (USBTMC) через стандартный VISA**. Заменяет капризный родной софт и предоставляет все возможности из программного мануала — без искусственных ограничений по командам.
+
+**В объёме (цель v1 = вся поверхность мануала):**
+- Real-time отображение осциллограммы обоих каналов.
+- Полный контроль каждой SCPI-подсистемы: вертикаль (канал), горизонталь (timebase), сбор данных (acquire), триггер (включая все типы декодирования шин), math/FFT, измерения, курсоры, дисплей, mask (тест допуск/брак), система и встроенный **генератор сигналов DDS**.
+- Захват осциллограммы в файл: CSV, NumPy (`.npy`/`.npz`), HDF5.
+- «Screenshot» = рендер нашего собственного waveform-view в PNG (в SCPI-наборе **нет** команды захвата экрана — см. §10).
+- Сохранение/загрузка пресетов (наш JSON как основной, `SETUp:ALL?` raw-снимок как бонус).
+- Sweep / multi-capture для серий измерений.
+- SCPI-терминал для прямого ввода команд и отладки.
+
+**Вне объёма (v1):** реверс-инжиниринг недокументированного протокола экрана прибора; оркестрация нескольких приборов; удалённая/сетевая работа.
+
+**Реальность реализации:** хотя *spec* покрывает весь мануал, сборка идёт слоистыми итерациями, каждая проверяется на реальном железе перед движением дальше (согласно оговорённому процессу).
+
+---
+
+## 2. Целевое окружение
 
 | | |
 |---|---|
-| OS | Windows 11 |
-| Transport | USB / USBTMC |
-| VISA backend | Keysight IO Libraries Suite (already installed & working) |
-| Device enumeration | Appears as "USB Test and Measurement Device (IVI)"; VISA resource like `USB0::0x????::0x????::<serial>::INSTR` |
-| Channels | 2 analog (CH1, CH2). Note: firmware reports `SYSTem:RAM? → 4` and the waveform header carries 4 channel slots generically; we parse generically but present 2. |
+| ОС | Windows 11 |
+| Транспорт | USB / USBTMC |
+| VISA-бэкенд | Keysight IO Libraries Suite (уже установлен и работает) |
+| Обнаружение устройства | Виден как «USB Test and Measurement Device (IVI)»; VISA-ресурс вида `USB0::0x????::0x????::<serial>::INSTR` |
+| Каналы | 2 аналоговых (CH1, CH2). Примечание: прошивка рапортует `SYSTem:RAM? → 4`, и заголовок осциллограммы несёт 4 слота каналов обобщённо; парсим обобщённо, но показываем 2. |
 
 ---
 
-## 3. Tech stack
+## 3. Технологический стек
 
-| Concern | Choice |
+| Аспект | Выбор |
 |---|---|
-| Language | Python 3.11+ |
+| Язык | Python 3.11+ |
 | GUI | PySide6 (Qt 6) |
-| Plotting | pyqtgraph (fast real-time) |
-| Instrument I/O | PyVISA (Keysight VISA backend) |
-| Numerics | NumPy |
-| File formats | stdlib `csv`, NumPy, `h5py` (HDF5) |
-| Tests | pytest |
+| Графики | pyqtgraph (быстрый real-time) |
+| Прибор I/O | PyVISA (бэкенд Keysight VISA) |
+| Численные данные | NumPy |
+| Форматы файлов | stdlib `csv`, NumPy, `h5py` (HDF5) |
+| Тесты | pytest |
 
-Rationale: best balance of development speed and real-time plot performance; mature instrument-control ecosystem; minimal, non-bulky dependencies; runs from a venv (no single-exe requirement, though packaging later is possible).
+Обоснование: лучший баланс скорости разработки и производительности real-time графиков; зрелая экосистема приборостроения; минимум зависимостей без громоздкости; запуск из venv (single-exe не требуется, хотя упаковка позже возможна).
 
 ---
 
-## 4. Architecture — layered
+## 4. Архитектура — слоистая
 
-Hard separation of layers so that (a) all logic is testable **without hardware**, and (b) blocking VISA I/O never freezes the UI thread.
+Жёсткое разделение слоёв, чтобы (а) вся логика тестировалась **без железа**, и (б) блокирующий VISA-I/O никогда не подвешивал UI-поток.
 
 ```
 ┌───────────────────────────────────────────────────────────┐
-│  gui/        PySide6 — main window, plot, control panels,   │
-│              generator, sweep, SCPI terminal, status bar    │
+│  gui/        PySide6 — главное окно, plot, панели контролов,│
+│              генератор, sweep, SCPI-терминал, статус-бар    │
 ├───────────────────────────────────────────────────────────┤
-│  engine/     acquisition controller in a background thread; │
-│              run/stop/single; emits frames to GUI (signals) │
+│  engine/     контроллер сбора данных в фоновом потоке;      │
+│              run/stop/single; шлёт кадры в GUI (signals)    │
 ├──────────────────────────┬────────────────────────────────┤
-│  scpi/  typed driver,     │  waveform/  chunked reader +    │
-│  1:1 with manual          │  header parser + sample→units   │
-│  (frozen reference)       │  conversion → NumPy             │
+│  scpi/  типизированный    │  waveform/  чанковое чтение +    │
+│  драйвер, 1:1 с мануалом  │  парсер заголовка + конвертация │
+│  (frozen reference)       │  сэмплов в единицы → NumPy      │
 ├──────────────────────────┴────────────────────────────────┤
-│  transport/  PyVISA wrapper (open/write/query/read_raw,     │
-│              timeouts, reconnect) + FakeTransport for tests │
+│  transport/  обёртка PyVISA (open/write/query/read_raw,     │
+│              таймауты, реконнект) + FakeTransport для тестов │
 └───────────────────────────────────────────────────────────┘
-        io/  CSV · NPY/NPZ · HDF5 · PNG · presets (JSON)
+        io/  CSV · NPY/NPZ · HDF5 · PNG · пресеты (JSON)
 ```
 
 ### 4.1 `transport/`
-- Thin wrapper over a PyVISA resource: `open(resource)`, `close()`, `write(cmd)`, `query(cmd)`, `read_raw()`, configurable timeout, termination handling.
-- Connection lifecycle: discover resources (`ResourceManager.list_resources()`), connect, `*IDN?` self-test, auto-reconnect on dropout.
-- `FakeTransport`: scriptable in-memory double returning canned responses and raw byte fixtures — the backbone of hardware-free unit tests.
-- **Interface boundary:** everything above depends only on the abstract transport, never on PyVISA directly.
+- Тонкая обёртка над PyVISA-ресурсом: `open(resource)`, `close()`, `write(cmd)`, `query(cmd)`, `read_raw()`, настраиваемый таймаут, обработка терминатора.
+- Жизненный цикл соединения: обнаружение ресурсов (`ResourceManager.list_resources()`), подключение, self-test через `*IDN?`, авто-реконнект при разрыве.
+- `FakeTransport`: скриптуемый in-memory дубль, возвращающий заготовленные ответы и байтовые фикстуры — основа тестов без железа.
+- **Граница интерфейса:** всё выше зависит только от абстрактного транспорта, никогда напрямую от PyVISA.
 
-### 4.2 `scpi/` — the frozen-reference driver
-- One module/class per subsystem: `channel`, `timebase`, `acquire`, `trigger` (with sub-objects: `edge`, `pulse`, `slope`, `tv`, `timeout`, `window`, `interval`, `runt`, `uart`, `can`, `lin`, `iic`, `spi`, `pattern`), `math`, `measure`, `cursor`, `display`, `mask`, `system`, `dds`.
-- Each command maps to a typed Python property/method, with parameter enums and ranges taken **verbatim from the registry**. Example:
+### 4.2 `scpi/` — драйвер frozen-reference
+- По модулю/классу на подсистему: `channel`, `timebase`, `acquire`, `trigger` (с под-объектами: `edge`, `pulse`, `slope`, `tv`, `timeout`, `window`, `interval`, `runt`, `uart`, `can`, `lin`, `iic`, `spi`, `pattern`), `math`, `measure`, `cursor`, `display`, `mask`, `system`, `dds`.
+- Каждая команда отображается в типизированное Python-свойство/метод, с enum'ами параметров и диапазонами, взятыми **дословно из реестра**. Пример:
   ```python
   scope.channel[1].scale = 1.0          # :CHANnel1:SCALe 1.0
   scope.channel[1].coupling = "DC"      # :CHANnel1:COUPling DC
   scope.timebase.scale = 5e-4           # :TIMebase:SCALe 5e-4
   scope.trigger.edge.level = 0.5        # :TRIGger:EDGe:LEVel 0.5
   ```
-- **Client-side validation + readback** (see §9): because the device has no error queue, the driver validates against known enums/ranges before sending and can read the value back to confirm.
-- Command strings centralized so the OCR-ambiguous literals (§11) live in exactly one place and are trivially swappable after hardware testing.
+- **Клиентская валидация + readback** (см. §9): поскольку у прибора нет очереди ошибок, драйвер валидирует по известным enum'ам/диапазонам перед отправкой и может читать значение обратно для подтверждения.
+- Строки команд централизованы, так что OCR-неоднозначные литералы (§11) живут ровно в одном месте и легко заменяются после тестов на железе.
 
-### 4.3 `waveform/` — acquisition decode (the crux)
-Parses `:WAVeform:DATA:ALL?`. This is the only waveform readout and has a bespoke format:
+### 4.3 `waveform/` — декодирование сбора данных (узловая часть)
+Парсит `:WAVeform:DATA:ALL?`. Это единственный способ выгрузки осциллограммы, и формат у него специфический:
 
-**Read algorithm:**
-1. Issue `:WAVeform:DATA:ALL?`, `read_raw()`.
-2. Parse the IEEE-488.2 block prefix `#9` + 9-digit current-packet byte length.
-3. **First packet** carries the full header (offsets data[0]…data[127], see registry §7):
-   running status, trigger status, per-channel **offset** (4 digits ×4), per-channel **voltage / V-div** (7 digits ×4), **channel-enable** mask (4 digits), **sampling rate** (9 digits), **sampling multiple** (6 digits), trigger time, frame start, reserved — then the first chunk of sample bytes.
-4. `total_len` (data[11..19]) gives the full byte count; `uploaded_len` (data[20..28]) gives how much has arrived. Keep issuing `:WAVeform:DATA:ALL?` to pull **subsequent chunks** (short header: `#9`, packet len, total len, uploaded len, then data) until `uploaded == total`.
-5. Convert raw samples → volts using header V/div + offset + counts-per-division; build the time axis from sampling rate (`dt = 1/SRATe`).
+**Алгоритм чтения:**
+1. Послать `:WAVeform:DATA:ALL?`, `read_raw()`.
+2. Распарсить префикс блока IEEE-488.2 `#9` + 9-значную длину текущего пакета в байтах.
+3. **Первый пакет** несёт полный заголовок (смещения data[0]…data[127], см. реестр §7):
+   running status, trigger status, **смещение** по каналам (4 цифры ×4), **напряжение / V-div** по каналам (7 цифр ×4), маска **включения каналов** (4 цифры), **частота дискретизации** (9 цифр), **sampling multiple** (6 цифр), trigger time, frame start, reserved — затем первый кусок байт сэмплов.
+4. `total_len` (data[11..19]) даёт полное число байт; `uploaded_len` (data[20..28]) — сколько пришло. Продолжаем слать `:WAVeform:DATA:ALL?` для подкачки **последующих чанков** (короткий заголовок: `#9`, длина пакета, total len, uploaded len, затем данные), пока `uploaded == total`.
+5. Конвертировать сырые сэмплы → вольты, используя V/div + смещение из заголовка + counts-per-division; построить ось времени по частоте дискретизации (`dt = 1/SRATe`).
 
-**Outputs:** per enabled channel, a NumPy array of volts + a shared time array, plus a metadata dict (sample rate, depth, trigger status, per-channel scale/offset).
+**Выход:** для каждого включённого канала NumPy-массив вольт + общий массив времени, плюс dict метаданных (частота дискретизации, глубина, trigger status, масштаб/смещение по каналам).
 
-> ⚠️ **Sample encoding (bytes-per-sample) and exact counts-per-division scaling are NOT fully specified by the manual** and must be calibrated on hardware against a known reference (built-in 1 kHz cal square or the DDS generator looped into a channel). This is the first hardware-verification task (§11).
+> ⚠️ **Кодировка сэмплов (байт на сэмпл) и точное масштабирование counts-per-division НЕ специфицированы мануалом** — их нужно откалибровать на железе по эталонному сигналу (встроенный 1 kHz cal-меандр или DDS-генератор, заведённый в канал). Это первая задача аппаратной проверки (§11).
 
-### 4.4 `engine/` — acquisition controller
-- Runs the acquire→read→decode loop on a background `QThread`; emits decoded frames to the GUI via Qt signals. VISA calls never touch the UI thread.
-- Manages transport states: Run (free-run/auto), Single, Stop, Force.
-- Arms acquisition, polls `:TRIGger:STATus?`, triggers waveform readout, decodes, emits.
-- **Depth/refresh tradeoff:** live view uses shallow memory depth (`:ACQuire:POINts 4000`) for fast transfer & high refresh; deep capture (to file) allows up to 8M with a progress indicator, non-real-time. We do **not** promise a fixed FPS — we measure achievable throughput on hardware and tune; the UI decouples from I/O regardless.
+### 4.4 `engine/` — контроллер сбора данных
+- Гоняет цикл собрать→прочитать→декодировать в фоновом `QThread`; шлёт декодированные кадры в GUI через Qt-сигналы. VISA-вызовы никогда не касаются UI-потока.
+- Управляет состояниями: Run (free-run/auto), Single, Stop, Force.
+- Армирует сбор, опрашивает `:TRIGger:STATus?`, инициирует выгрузку осциллограммы, декодирует, эмитит.
+- **Trade-off глубина/частота обновления:** live-view использует малую глубину памяти (`:ACQuire:POINts 4000`) для быстрого трансфера и высокого refresh; deep-capture (в файл) разрешает до 8M с индикатором прогресса, не real-time. Мы **не** обещаем фиксированный FPS — измеряем достижимую пропускную способность на железе и тюним; UI в любом случае развязан от I/O.
 
 ### 4.5 `gui/`
-PySide6 main window (see §8 / the Claude-design prompt for visual detail):
-- Central pyqtgraph graticule (dual channel, grid, cursors, trigger-level & ground markers).
-- Right-side control dock: Vertical, Horizontal, Trigger, Acquire, Measure, Math, Cursors, Display panels.
-- Generator (DDS) panel, Sweep panel, SCPI terminal dock, top transport toolbar, bottom status bar.
+Главное окно PySide6 (визуальные детали см. §8 / промпт Claude design):
+- Центральный pyqtgraph-графикуль (два канала, сетка, курсоры, маркеры уровня триггера и «земли»).
+- Правый док контролов: панели Вертикаль, Горизонталь, Триггер, Acquire, Измерения, Math, Курсоры, Дисплей.
+- Панель генератора (DDS), панель Sweep, док SCPI-терминала, верхний transport-тулбар, нижний статус-бар.
 
 ### 4.6 `io/`
-CSV, NumPy `.npy`/`.npz`, HDF5 (h5py), PNG screenshot (render of the plot scene), and preset serialization (§7-formats).
+CSV, NumPy `.npy`/`.npz`, HDF5 (h5py), PNG-скриншот (рендер сцены графика) и сериализация пресетов (форматы §7).
 
-### 4.7 Package layout
+### 4.7 Структура пакета
 ```
 hantek_dso2d15/
   transport/   __init__.py  visa_transport.py  fake_transport.py
   scpi/        channel.py timebase.py acquire.py trigger/ math.py
                measure.py cursor.py display.py mask.py system.py dds.py
-               scope.py        # top-level facade aggregating subsystems
+               scope.py        # фасад верхнего уровня, агрегирует подсистемы
   waveform/    reader.py  header.py  convert.py
   engine/      controller.py  states.py
   gui/         main_window.py  plot_widget.py  panels/  terminal.py
   io/          csv_io.py  npy_io.py  hdf5_io.py  png_io.py  presets.py
-  app.py       # entry point
+  app.py       # точка входа
 tests/
 docs/
   DSO2000-SCPI-Programmers-Manual.pdf
@@ -144,116 +144,116 @@ docs/
 
 ---
 
-## 5. Feature → subsystem mapping (UI surface)
+## 5. Маппинг фич → подсистемы (поверхность UI)
 
-| UI area | SCPI subsystem(s) |
+| Область UI | SCPI-подсистема(ы) |
 |---|---|
-| Vertical (per channel) | `CHANnel<n>`: SCALe, OFFSet, COUPling, BWLimit, PROBe, INVert, VERNier, DISPlay |
-| Horizontal | `TIMebase`: SCALe, POSition, RANGe, MODE, WINDow(zoom) |
+| Вертикаль (по каналу) | `CHANnel<n>`: SCALe, OFFSet, COUPling, BWLimit, PROBe, INVert, VERNier, DISPlay |
+| Горизонталь | `TIMebase`: SCALe, POSition, RANGe, MODE, WINDow(zoom) |
 | Acquire | `ACQuire`: POINts, TYPE, COUNt, SRATe? |
-| Trigger | `TRIGger`: MODE, SWEep, HOLDoff, FORCe, STATus?, + per-type (EDGe/PULSe/SLOPe/TV/TIMeout/WINDOw/INTERVAl/UNDER_Am/UART/CAN/LIN/IIC/SPI/PATTern) |
-| Measure | `MEASure`: ENABle, SOURce, ADISplay, CHANnel\<n\>:ITEM (37 types), GATE |
+| Триггер | `TRIGger`: MODE, SWEep, HOLDoff, FORCe, STATus?, + по типам (EDGe/PULSe/SLOPe/TV/TIMeout/WINDOw/INTERVAl/UNDER_Am/UART/CAN/LIN/IIC/SPI/PATTern) |
+| Измерения | `MEASure`: ENABle, SOURce, ADISplay, CHANnel\<n\>:ITEM (37 типов), GATE |
 | Math | `MATH`: DISPlay, OPERator (ADD/SUB/MUL/DIV/FFT), SOURce1/2, SCALe, OFFSet, FFT:* |
-| Cursors | `CURSor`: MODE, MANual:*, TRACk:* |
-| Display | `DISPlay`: TYPE, GRID, WBRightness, GBRightness |
-| Pass/Fail | `MASK`: EANBle[sic], SOURce, X, Y, CREate, OUTPut, SOOutput, MDISplay |
-| Generator | `DDS`: SWITch, TYPE, FREQ, AMP, OFFSet, DUTY, WAVE:MODE, MODE:* (AM/FM), BURSt:*, ARB:DAC16:BIN |
-| System/util | `SYSTem`: PON, LANGuage, LOCKed, GAM?, RAM?; `CALibrate`; `SETUp:ALL?` |
+| Курсоры | `CURSor`: MODE, MANual:*, TRACk:* |
+| Дисплей | `DISPlay`: TYPE, GRID, WBRightness, GBRightness |
+| Допуск/брак | `MASK`: EANBle[sic], SOURce, X, Y, CREate, OUTPut, SOOutput, MDISplay |
+| Генератор | `DDS`: SWITch, TYPE, FREQ, AMP, OFFSet, DUTY, WAVE:MODE, MODE:* (AM/FM), BURSt:*, ARB:DAC16:BIN |
+| Система/утилиты | `SYSTem`: PON, LANGuage, LOCKed, GAM?, RAM?; `CALibrate`; `SETUp:ALL?` |
 
 ---
 
-## 6. Real-time pipeline summary
+## 6. Сводка real-time pipeline
 
-`engine` thread loop → arm → poll `:TRIGger:STATus?` → `:WAVeform:DATA:ALL?` chunked read → `waveform` decode → emit NumPy frame → `gui` `setData`. Shallow depth for live; deep for capture. Bottleneck is USBTMC transfer; throughput measured & tuned on hardware.
-
----
-
-## 7. Data formats & presets
-
-**Waveform export:**
-- **CSV** — human-readable: time column + one column per enabled channel (volts), header with metadata comments.
-- **NumPy `.npy`/`.npz`** — arrays + metadata dict.
-- **HDF5** — datasets per channel + attributes (scale, offset, sample rate, depth, timestamp); suited to sweep/multi-capture series.
-- **PNG** — render of the plot scene (the "screenshot").
-
-**Presets:**
-- **Primary: our JSON** — structured snapshot of every setting we expose; portable, human-readable, versioned. Restored by replaying typed driver setters (with readback confirmation).
-- **Bonus: `SETUp:ALL?` raw snapshot** — stored as opaque string. Whether it can be written back to the instrument is **not documented**; flagged for hardware verification (§11). If a write-back form works, we expose "restore raw snapshot"; otherwise JSON-replay remains authoritative.
+Цикл потока `engine` → arm → опрос `:TRIGger:STATus?` → чанковое чтение `:WAVeform:DATA:ALL?` → декодирование `waveform` → эмит NumPy-кадра → `setData` в `gui`. Малая глубина для live; большая для capture. Бутылочное горло — USBTMC-трансфер; пропускная способность измеряется и тюнится на железе.
 
 ---
 
-## 8. UI / visual design
+## 7. Форматы данных и пресеты
 
-Visual mockup is produced separately in **Claude design** (detailed prompt already drafted). Key conventions baked in: dark instrument theme; channel color coding (CH1 yellow, CH2 cyan, MATH magenta); monospaced numeric readouts; dense benchtop-scope layout — central graticule, right-side control dock, transport toolbar, status bar, generator panel, SCPI terminal dock. The Qt implementation follows the approved mockup.
+**Экспорт осциллограммы:**
+- **CSV** — человекочитаемый: колонка времени + по колонке на включённый канал (вольты), заголовок с метаданными в комментариях.
+- **NumPy `.npy`/`.npz`** — массивы + dict метаданных.
+- **HDF5** — датасеты по каналам + атрибуты (масштаб, смещение, частота дискретизации, глубина, timestamp); подходит для серий sweep/multi-capture.
+- **PNG** — рендер сцены графика («скриншот»).
 
-**Localization:** the UI is **bilingual (English / Russian) with a runtime language switcher**. All user-facing strings go through a translation layer (Qt `tr()` / `.ts` files or an equivalent dict-based mechanism) from the start — no hard-coded labels. Default language English; switchable to Russian without restart. Instrument-standard unit tokens (V/div, s/div, Hz) stay as-is in both languages.
-
----
-
-## 9. Error handling & validation
-
-- **No `SYSTem:ERRor?` in the manual** → the instrument exposes no queryable error queue. Therefore:
-  - The driver **validates parameters client-side** against the registry's enums/ranges before sending.
-  - After a set, it can **read the value back** to confirm the instrument applied it (the manual notes out-of-range values clamp to nearest legal).
-- VISA timeouts / disconnects → surfaced in the status bar, auto-reconnect attempted, UI never crashes.
-- SCPI terminal shows sent/received/error lines so the user can diagnose directly.
+**Пресеты:**
+- **Основной: наш JSON** — структурированный снимок каждой настройки, которую мы предоставляем; портируемый, человекочитаемый, версионируемый. Восстанавливается проигрыванием типизированных сеттеров драйвера (с подтверждением через readback).
+- **Бонус: `SETUp:ALL?` raw-снимок** — хранится как непрозрачная строка. Можно ли записать её обратно в прибор — **не документировано**; помечено для аппаратной проверки (§11). Если форма write-back работает — даём «восстановить raw-снимок»; иначе авторитетным остаётся JSON-проигрывание.
 
 ---
 
-## 10. Notable manual findings driving design
+## 8. UI / визуальный дизайн
 
-- `:WAVeform:DATA:ALL?` is the **only** waveform readout; chunked; bespoke header (§4.3).
-- **No screenshot command** anywhere in the SCPI set → screenshot = render of our own view.
-- `:SETUp:ALL?` gives a full settings snapshot string (write-back undocumented).
-- `:MEASure:CHANnel<n>:ITEM?` returns instrument-computed measurements (37 types) — query only.
-- `:DDS:ARB:DAC16:BIN` downloads arbitrary waveforms (exactly 4096 points, 2 bytes/point, little-endian).
+Визуальный макет создаётся отдельно в **Claude design** (подробный промпт уже составлен). Ключевые конвенции заложены: тёмная приборная тема; цветовая кодировка каналов (CH1 жёлтый, CH2 голубой, MATH пурпурный); моноширинные числовые ридауты; плотная benchtop-scope раскладка — центральный графикуль, правый док контролов, transport-тулбар, статус-бар, панель генератора, док SCPI-терминала. Реализация на Qt следует утверждённому макету.
+
+**Локализация:** UI **двуязычный (английский / русский) с runtime-переключателем языка**. Все пользовательские строки с самого начала проходят через слой перевода (Qt `tr()` / `.ts`-файлы или эквивалентный dict-механизм) — никаких хардкод-лейблов. Язык по умолчанию английский; переключается на русский без перезапуска. Стандартные приборные токены единиц (V/div, s/div, Hz) остаются как есть в обоих языках.
 
 ---
 
-## 11. Hardware-verification TODO (do not trust blindly)
+## 9. Обработка ошибок и валидация
 
-The manual is a frozen reference but contains OCR artifacts and gaps. Before the driver trusts these literals, confirm on the device:
-
-1. **Sample encoding & scaling** — bytes-per-sample and counts-per-division for `WAVeform:DATA:ALL?` conversion; calibrate against a known signal. *(Blocks accurate volts/time.)*
-2. **`SETUp:ALL?` write-back** — is there a set form to restore a raw snapshot?
-3. **`:MASK:EANBle`** — is the literal misspelling required, or does `ENABle` work?
-4. **Trigger keyword divergence** — `TRIGger:MODE` enum spells types `INTerval / UNDerthrow / WINdow / EDGE`, but sub-command keywords are `INTERVAl / UNDER_Am / WINDOw / EDGe`. Confirm each literal the firmware accepts.
-5. **`PATTern` vs `LOGIc`** — §4.19 uses `TRIGger:PATTern:*`; `SETUp:ALL?` references `TRIGger:LOGIc:*` for the same feature. Which does the device accept?
-6. **Phantom commands** in `SETUp:ALL?` only: `TRIGger:UART:STOP`, `TRIGger:CAN:DATA` (no index), `TRIGger:LOGIc:CLEVel/DLEVel`.
-7. **CAN condition enums** `FRAM_STARE` / `FRAM_REE` — likely OCR for `FRAME_START` / `FRAME_ERROR`; confirm literal strings.
-8. **`RISIng` / `EQUAI` / `GRAt`** casing in slope/pulse enums.
-9. **EXT/10 trigger source** — does DSO2D15 (2-ch) accept `EXT/10`?
-
-Each becomes a smoke-test assertion; the driver keeps these literals in one place for easy correction.
+- **В мануале нет `SYSTem:ERRor?`** → прибор не предоставляет опрашиваемую очередь ошибок. Поэтому:
+  - Драйвер **валидирует параметры клиентски** по enum'ам/диапазонам из реестра перед отправкой.
+  - После установки может **читать значение обратно** для подтверждения, что прибор его применил (мануал отмечает, что значения вне диапазона зажимаются к ближайшему допустимому).
+- Таймауты / разрывы VISA → отражаются в статус-баре, предпринимается авто-реконнект, UI никогда не падает.
+- SCPI-терминал показывает строки отправлено/получено/ошибка, чтобы пользователь мог диагностировать напрямую.
 
 ---
 
-## 12. Testing strategy
+## 10. Важные находки из мануала, влияющие на дизайн
 
-- **Hardware-free unit tests (pytest):** header parser & sample conversion against captured raw-byte fixtures; command-string formatting; parameter validation; preset (JSON) round-trip; file-format round-trips — all via `FakeTransport`. TDD especially for `waveform/` and `scpi/`.
-- **Hardware smoke tests:** scripted routines the user runs after each iteration (connect/`*IDN?`, set+readback per subsystem, one full waveform capture+decode, generator output, the §11 verification checks).
-- **Iteration discipline:** each layer verified on the real DSO2D15 before building atop it.
-
----
-
-## 13. Build order (informs the implementation plan)
-
-1. `transport` + `FakeTransport` + connection self-test.
-2. `scpi` core (channel/timebase/acquire/trigger-edge) with validation+readback.
-3. `waveform` reader/decoder — **calibrated on hardware** (verification item #1).
-4. `engine` loop + minimal `gui` (plot + connect + run/stop) → first live dual-channel display.
-5. Remaining control panels (full trigger, measure, math/FFT, cursor, display, mask).
-6. Generator (DDS) panel.
-7. IO (CSV/npy/HDF5/PNG) + presets.
-8. Sweep/multi-capture + SCPI terminal.
-
-(Detailed task plan to be produced via the writing-plans step.)
+- `:WAVeform:DATA:ALL?` — **единственная** выгрузка осциллограммы; чанковая; специфический заголовок (§4.3).
+- **Нет команды screenshot** нигде в SCPI-наборе → скриншот = рендер нашего собственного view.
+- `:SETUp:ALL?` даёт полный снимок настроек строкой (write-back недокументирован).
+- `:MEASure:CHANnel<n>:ITEM?` возвращает измерения, вычисленные прибором (37 типов) — только чтение.
+- `:DDS:ARB:DAC16:BIN` загружает произвольные формы (ровно 4096 точек, 2 байта/точка, little-endian).
 
 ---
 
-## 14. Open questions
+## 11. Список аппаратной проверки (не доверять вслепую)
 
-- HDF5 schema details (finalize when wiring sweep).
-- Exact live-view default memory depth (pick after measuring throughput).
+Мануал — frozen reference, но содержит OCR-артефакты и пробелы. Прежде чем драйвер доверится этим литералам, подтвердить на устройстве:
 
-*(Resolved: UI is bilingual EN/RU with runtime switcher — §8. Git repository initialized as project baseline.)*
+1. **Кодировка и масштабирование сэмплов** — байт-на-сэмпл и counts-per-division для конвертации `WAVeform:DATA:ALL?`; откалибровать по известному сигналу. *(Блокирует точные вольты/время.)*
+2. **Write-back `SETUp:ALL?`** — есть ли set-форма для восстановления raw-снимка?
+3. **`:MASK:EANBle`** — нужен ли литерал-опечатка, или работает `ENABle`?
+4. **Расхождение ключей триггера** — enum `TRIGger:MODE` пишет типы как `INTerval / UNDerthrow / WINdow / EDGE`, но ключи подкоманд — `INTERVAl / UNDER_Am / WINDOw / EDGe`. Подтвердить каждый литерал, который принимает прошивка.
+5. **`PATTern` vs `LOGIc`** — §4.19 использует `TRIGger:PATTern:*`; `SETUp:ALL?` ссылается на `TRIGger:LOGIc:*` для той же фичи. Какой принимает прибор?
+6. **«Фантомные» команды** только в `SETUp:ALL?`: `TRIGger:UART:STOP`, `TRIGger:CAN:DATA` (без индекса), `TRIGger:LOGIc:CLEVel/DLEVel`.
+7. **Enum'ы условий CAN** `FRAM_STARE` / `FRAM_REE` — вероятно, OCR от `FRAME_START` / `FRAME_ERROR`; подтвердить литеральные строки.
+8. **Регистр `RISIng` / `EQUAI` / `GRAt`** в enum'ах slope/pulse.
+9. **Источник триггера EXT/10** — принимает ли DSO2D15 (2 канала) `EXT/10`?
+
+Каждый становится smoke-test проверкой; драйвер держит эти литералы в одном месте для лёгкой коррекции.
+
+---
+
+## 12. Стратегия тестирования
+
+- **Юнит-тесты без железа (pytest):** парсер заголовка и конвертация сэмплов по захваченным байтовым фикстурам; форматирование строк команд; валидация параметров; round-trip пресетов (JSON); round-trip форматов файлов — всё через `FakeTransport`. TDD особенно для `waveform/` и `scpi/`.
+- **Smoke-тесты на железе:** скриптовые процедуры, которые пользователь прогоняет после каждой итерации (connect/`*IDN?`, set+readback по подсистемам, один полный захват+декодирование осциллограммы, выход генератора, проверки из §11).
+- **Дисциплина итераций:** каждый слой проверяется на реальном DSO2D15 перед надстройкой сверху.
+
+---
+
+## 13. Порядок сборки (основа для implementation-плана)
+
+1. `transport` + `FakeTransport` + self-test соединения.
+2. Ядро `scpi` (channel/timebase/acquire/trigger-edge) с валидацией+readback.
+3. Чтение/декодирование `waveform` — **калибровка на железе** (пункт проверки #1).
+4. Цикл `engine` + минимальный `gui` (plot + connect + run/stop) → первый live-дисплей обоих каналов.
+5. Остальные панели контролов (полный триггер, измерения, math/FFT, курсор, дисплей, mask).
+6. Панель генератора (DDS).
+7. IO (CSV/npy/HDF5/PNG) + пресеты.
+8. Sweep/multi-capture + SCPI-терминал.
+
+(Подробный план задач — на шаге writing-plans.)
+
+---
+
+## 14. Открытые вопросы
+
+- Детали схемы HDF5 (финализировать при подключении sweep).
+- Точная глубина памяти live-view по умолчанию (выбрать после измерения пропускной способности).
+
+*(Решено: UI двуязычный EN/RU с runtime-переключателем — §8. Git-репозиторий инициализирован как baseline проекта.)*

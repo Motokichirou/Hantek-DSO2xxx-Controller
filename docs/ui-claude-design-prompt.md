@@ -1,6 +1,8 @@
-# Claude Design — UI prompt (Hantek DSO2D15 client)
+# Claude Design — промпт для UI (клиент Hantek DSO2D15)
 
-Prompt for generating the desktop UI mockup in Claude design. Implementation (PySide6) follows the approved mockup. UI is bilingual EN/RU (default EN) — the mockup is in English; Russian is handled at implementation time via the translation layer.
+Промпт для генерации макета десктоп-UI в Claude design. Реализация (PySide6) следует утверждённому макету. UI двуязычный EN/RU (по умолчанию EN) — макет на английском; русский обрабатывается на этапе реализации через слой перевода.
+
+> **Примечание:** тело промпта ниже намеренно оставлено на английском — это вход для Claude design, и макет по умолчанию англоязычный (согласно решению о двуязычии: EN-макет, RU на этапе реализации). Если нужен русскоязычный макет — скажи, переведу промпт на русский.
 
 ---
 

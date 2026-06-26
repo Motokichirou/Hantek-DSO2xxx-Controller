@@ -14,8 +14,9 @@ env/
 .coverage
 htmlcov/
 
-# Archives (design handoff is committed extracted under design/, not as zip)
+# Archives / installers (не коммитим бинарные дистрибутивы — напр. NI Package Manager)
 *.zip
+*.exe
 
 # IDE / OS
 .vscode/

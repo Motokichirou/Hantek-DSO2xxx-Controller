@@ -282,7 +282,7 @@
 **Files:** Create `hantek_dso2d15/transport/visa_transport.py`, `tests/transport/test_visa_transport.py`. Modify `hantek_dso2d15/transport/__init__.py` (реэкспорт всех трёх).
 
 **Interfaces — Consumes:** `Transport` (Задача 2), `pyvisa`. **Produces:** `VisaTransport(Transport)`:
-- `__init__(self, resource: str, *, timeout_ms: int = 5000, read_termination: str | None = "\n", write_termination: str | None = "\n", resource_manager=None)`.
+- `__init__(self, resource: str, *, timeout_ms: int = 5000, read_termination: str | None = None, write_termination: str | None = "\n", resource_manager=None)`. *(read_termination=None: USBTMC завершает чтение по EOM; DSO2D15 не шлёт `\n` в ответах — подтверждено на железе; None также защищает бинарный блок waveform от обрыва на `0x0A`.)*
 - `list_resources(resource_manager=None) -> tuple[str, ...]` — `@staticmethod`; берёт/создаёт RM (`pyvisa.ResourceManager()`), возвращает `tuple(rm.list_resources())`.
 - `open()` — создать RM при необходимости, `self._res = rm.open_resource(resource)`, выставить `timeout`, `read_termination`, `write_termination`.
 - `close()` — закрыть ресурс, занулить; `is_open` → `bool(self._res)`.

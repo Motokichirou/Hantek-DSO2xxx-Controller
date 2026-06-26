@@ -22,7 +22,10 @@ class VisaTransport(Transport):
     timeout_ms:
         Таймаут операций ввода-вывода в миллисекундах (default 5000).
     read_termination:
-        Символ(ы) конца строки для чтения (default ``"\\n"``).
+        Символ(ы) конца строки для чтения (default ``None``). Для USBTMC чтение
+        завершается по биту EOM пакета, а не по символу-терминатору; DSO2D15 не
+        добавляет ``\\n`` к ответам (подтверждено на железе). ``None`` также не
+        даёт оборвать бинарный блок ``WAVeform:DATA:ALL?`` на байте ``0x0A``.
     write_termination:
         Символ(ы) конца строки для записи (default ``"\\n"``).
     resource_manager:
@@ -36,7 +39,7 @@ class VisaTransport(Transport):
         resource: str,
         *,
         timeout_ms: int = 5000,
-        read_termination: str | None = "\n",
+        read_termination: str | None = None,
         write_termination: str | None = "\n",
         resource_manager=None,
     ) -> None:

@@ -31,8 +31,8 @@
 |---|---|
 | ОС | Windows 11 |
 | Транспорт | USB / USBTMC |
-| VISA-бэкенд | Keysight IO Libraries Suite (уже установлен и работает) |
-| Обнаружение устройства | Виден как «USB Test and Measurement Device (IVI)»; VISA-ресурс вида `USB0::0x????::0x????::<serial>::INSTR` |
+| VISA-бэкенд | **NI-VISA** (подтверждён на железе 2026-06-26). Изначально планировался Keysight/Agilent IO Libraries, но прибор сидит на драйвере Microsoft `usbtmc.sys`, который Agilent VISA не видит; NI-VISA с `usbtmc.sys` работает штатно. |
+| Обнаружение устройства | Класс «USB Test and Measurement Device (IVI)»; подтверждённый ресурс **`USB0::0x049F::0x505E::CN2352029065656::INSTR`** (VID 0x049F, PID 0x505E). `*IDN?` → `undefined, DSO2D15, CN2352029065656, 3.0.0(230831.00)` (поле производителя = `undefined` — причуда прошивки). |
 | Каналы | 2 аналоговых (CH1, CH2). Примечание: прошивка рапортует `SYSTem:RAM? → 4`, и заголовок осциллограммы несёт 4 слота каналов обобщённо; парсим обобщённо, но показываем 2. |
 
 ---

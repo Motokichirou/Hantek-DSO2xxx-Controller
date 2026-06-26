@@ -118,8 +118,9 @@ class TestOpen:
         assert fake_rm._last_opened.timeout == 5000
 
     def test_sets_read_termination(self, fake_rm, vt):
+        # USBTMC завершает чтение по EOM, не по символу; default None (подтверждено на железе).
         vt.open()
-        assert fake_rm._last_opened.read_termination == "\n"
+        assert fake_rm._last_opened.read_termination is None
 
     def test_sets_write_termination(self, fake_rm, vt):
         vt.open()
@@ -245,7 +246,7 @@ class TestWithMagicMock:
 
         rm.open_resource.assert_called_once_with("USB0::X::INSTR")
         assert fake_res.timeout == 5000
-        assert fake_res.read_termination == "\n"
+        assert fake_res.read_termination is None
         assert fake_res.write_termination == "\n"
 
     def test_write_delegates(self):

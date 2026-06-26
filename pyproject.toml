@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "hantek-dso2d15"
+version = "0.0.1"
+requires-python = ">=3.11"
+dependencies = ["pyvisa", "numpy"]
+
+[project.optional-dependencies]
+test = ["pytest"]
+
+[tool.setuptools.packages.find]
+include = ["hantek_dso2d15*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"

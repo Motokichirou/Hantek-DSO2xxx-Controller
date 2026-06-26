@@ -6,6 +6,8 @@
 """
 from __future__ import annotations
 
+from dataclasses import replace
+
 from hantek_dso2d15.waveform.decode import decode_frame, DecodedFrame
 from hantek_dso2d15.waveform.reader import RawFrame
 
@@ -32,13 +34,46 @@ class AcquisitionController:
         self._scope = scope
         self._reader = reader
         self._decoder = decoder
+        # Кэш масштабов/смещений по каналам. Пустой → значения запрашиваются с
+        # прибора при каждом кадре (исходное поведение). Заполняется через
+        # refresh_scaling(); используется live-циклом, чтобы не слать
+        # :SCALe?/:OFFSet? на каждый кадр (ускорение fps).
+        self._scale_cache: dict[int, float] = {}
+        self._offset_cache: dict[int, float] = {}
+
+    def refresh_scaling(self, channels=(1, 2, 3, 4)) -> None:
+        """Запросить и закэшировать scale/offset указанных каналов.
+
+        Вызывать после connect и при смене вертикальных настроек. После этого
+        ``read_decoded_frame()`` берёт масштабы из кэша, не дёргая прибор
+        каждый кадр.
+        """
+        for n in channels:
+            self._scale_cache[n] = self._scope.channel[n].scale
+            self._offset_cache[n] = self._scope.channel[n].offset
+
+    def clear_scaling_cache(self) -> None:
+        """Сбросить кэш масштабов (следующий кадр снова запросит с прибора)."""
+        self._scale_cache.clear()
+        self._offset_cache.clear()
+
+    def _scale_for(self, n: int) -> float:
+        if n in self._scale_cache:
+            return self._scale_cache[n]
+        return self._scope.channel[n].scale
+
+    def _offset_for(self, n: int) -> float:
+        if n in self._offset_cache:
+            return self._offset_cache[n]
+        return self._scope.channel[n].offset
 
     def read_decoded_frame(self) -> DecodedFrame:
         """Прочитать один кадр с прибора и вернуть декодированный DecodedFrame.
 
         1. Читает сырой кадр через ``reader.read_frame()``.
         2. Определяет включённые каналы из заголовка кадра.
-        3. Запрашивает scale и offset для каждого канала через Scope.
+        3. Берёт scale/offset из кэша (если заполнен через refresh_scaling),
+           иначе запрашивает с прибора.
         4. Декодирует через ``decoder(frame, scales, offsets)``.
 
         Returns
@@ -47,10 +82,28 @@ class AcquisitionController:
             Декодированный кадр с напряжениями и временной осью.
         """
         frame: RawFrame = self._reader.read_frame()
-        chans = frame.header.enabled_channels
-        scales = {n: self._scope.channel[n].scale for n in chans}
-        offsets = {n: self._scope.channel[n].offset for n in chans}
-        return self._decoder(frame, scales, offsets)
+
+        # Квирк прошивки DSO2D15 3.0.0 (HARDWARE-VERIFIED 2026-06-27):
+        # :WAVeform:DATA:ALL? возвращает сэмплы ТОЛЬКО CH1, продублированные по
+        # числу включённых каналов (:WAVeform:SOURce не переключает; подтверждено
+        # offset-подписью). Дедуплицируем одинаковые payload и сопоставляем
+        # реальные данные первым включённым каналам. Если будущая прошивка/команда
+        # начнёт отдавать различные пакеты — покажутся все каналы (forward-compatible).
+        unique: list[bytes] = []
+        for payload in frame.data_payloads:
+            if payload not in unique:
+                unique.append(payload)
+
+        enabled = frame.header.enabled_channels
+        use_channels = enabled[: len(unique)] if unique else enabled[:1]
+
+        scales = {n: self._scale_for(n) for n in use_channels}
+        offsets = {n: self._offset_for(n) for n in use_channels}
+        corrected = RawFrame(
+            header=replace(frame.header, enabled_channels=list(use_channels)),
+            data_payloads=unique[: len(use_channels)],
+        )
+        return self._decoder(corrected, scales, offsets)
 
     def force(self) -> None:
         """Отправить принудительный триггер (:TRIGger:FORCe).

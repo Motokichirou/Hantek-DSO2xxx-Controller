@@ -100,11 +100,16 @@ class TestReadDecodedFrameTwoChannels:
         result = controller.read_decoded_frame()
         assert isinstance(result, DecodedFrame)
 
-    def test_channels_set_is_ch1_and_ch2(self):
-        """Two-channel fixture must decode channels {1, 2}."""
+    def test_duplicate_payloads_collapse_to_ch1(self):
+        """Квирк прошивки: DATA:ALL? отдаёт CH1, продублированный по каналам.
+
+        В 2-канальной фикстуре оба data-пакета БАЙТ-ИДЕНТИЧНЫ (подтверждено на
+        железе). Контроллер дедуплицирует → реальный канал только CH1
+        (форвард-совместимо: различные пакеты дали бы оба канала).
+        """
         controller, _ = _make_controller_ch1ch2()
         result = controller.read_decoded_frame()
-        assert set(result.channels.keys()) == {1, 2}
+        assert set(result.channels.keys()) == {1}
 
     def test_ch1_mean_approx_1v(self):
         controller, _ = _make_controller_ch1ch2()
@@ -200,3 +205,31 @@ class TestCustomDecoder:
         _, scales, offsets = calls[0]
         assert scales == {1: 1.0}
         assert offsets == {1: 0.0}
+
+
+# ---------------------------------------------------------------------------
+# Test: refresh_scaling кэширует scale/offset (fps-оптимизация)
+# ---------------------------------------------------------------------------
+
+def test_refresh_scaling_caches_values():
+    controller, transport = _make_controller_ch1()
+    controller.refresh_scaling([1])
+    # Кэш заполнен -> новый кадр не должен слать :CHANnel1:SCALe? повторно
+    before = sum(1 for q in transport.queries if q == ":CHANnel1:SCALe?")
+    controller.read_decoded_frame()
+    after = sum(1 for q in transport.queries if q == ":CHANnel1:SCALe?")
+    assert after == before, "после refresh_scaling кадр не должен повторно запрашивать SCALe?"
+
+
+def test_cached_scaling_used_even_if_device_changes():
+    controller, transport = _make_controller_ch1()
+    transport.set_response(":CHANnel1:SCALe?", "1.000000e+00")
+    controller.refresh_scaling([1])
+    # Прибор «сменил» масштаб, но кэш держит старое значение
+    transport.set_response(":CHANnel1:SCALe?", "2.000000e+00")
+    frame = controller.read_decoded_frame()
+    assert abs(float(np.mean(frame.channels[1])) - 1.0) < 0.1, "должен использоваться кэш 1.0 V/div"
+    # После сброса кэша берётся новое значение прибора (2.0 V/div -> ~2.0 V)
+    controller.clear_scaling_cache()
+    frame2 = controller.read_decoded_frame()
+    assert abs(float(np.mean(frame2.channels[1])) - 2.0) < 0.2, "после clear берётся новый масштаб 2.0"

@@ -99,6 +99,11 @@ class WaveformReader:
             raw = transport.read_raw()
             iterations += 1
 
+            # Защита от коротких/пустых пакетов (десинк при быстром опросе):
+            # пакет без полного 29-байтового префикса пропускаем.
+            if len(raw) < 29 or raw[:2] != b"#9":
+                continue
+
             if is_header(raw):
                 header = parse_header(raw)
                 total = parse_packet(raw).total
@@ -125,6 +130,9 @@ class WaveformReader:
             transport.write(_QUERY)
             raw = transport.read_raw()
             iterations += 1
+
+            if len(raw) < 29 or raw[:2] != b"#9":
+                continue  # короткий/битый пакет — пропускаем
 
             if is_header(raw):
                 # Unexpected header mid-stream — skip it.

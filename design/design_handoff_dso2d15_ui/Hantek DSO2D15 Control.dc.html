@@ -1,0 +1,607 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0;background:#0E0F12}
+  button{font-family:inherit}
+  ::-webkit-scrollbar{width:9px;height:9px}
+  ::-webkit-scrollbar-thumb{background:#2A2D34;border-radius:5px}
+  ::-webkit-scrollbar-track{background:transparent}
+</style>
+</helmet>
+<div style="width:1920px;height:1080px;background:#0E0F12;font-family:Inter,Segoe UI,sans-serif;color:#C5C9D1;display:flex;flex-direction:column;overflow:hidden;position:relative">
+
+  <!-- ===================== TOP TOOLBAR ===================== -->
+  <div style="height:48px;flex-shrink:0;display:flex;align-items:center;padding:0 12px;gap:10px;background:#16181D;border-bottom:1px solid #2A2D34">
+    <!-- left: connection -->
+    <div style="display:flex;align-items:center;gap:8px">
+      <div style="display:flex;align-items:center;background:#0E0F12;border:1px solid #2A2D34;border-radius:5px;height:30px;padding:0 10px;gap:8px;min-width:300px;cursor:pointer">
+        <span style="width:7px;height:7px;border-radius:50%;background:#37D67A;box-shadow:0 0 6px #37D67A"></span>
+        <span style="font:500 12px 'JetBrains Mono',monospace;color:#C5C9D1;flex:1">USB0::0x049F::0x505::SN21034::INSTR</span>
+        <span style="color:#5A606C;font-size:10px">▾</span>
+      </div>
+      <button style="height:30px;padding:0 14px;border-radius:5px;border:1px solid #2F4A3C;background:rgba(55,214,122,0.12);color:#37D67A;font:600 12px Inter,sans-serif;cursor:pointer">Disconnect</button>
+      <div style="display:flex;flex-direction:column;line-height:1.1;padding-left:4px">
+        <span style="font:600 12px Inter,sans-serif;color:#E6E9EF">Hantek DSO2D15</span>
+        <span style="font:500 10px 'JetBrains Mono',monospace;color:#6E747F">FW V1.2.3 · CN21034</span>
+      </div>
+    </div>
+
+    <!-- center: transport -->
+    <div style="flex:1;display:flex;justify-content:center;align-items:center;gap:8px">
+      <button onClick="{{ toggleRun }}" style="{{ runBtnStyle }}">{{ runLabel }}</button>
+      <button style="height:34px;padding:0 16px;border-radius:6px;border:1px solid #6A521E;background:rgba(245,166,35,0.10);color:#F5A623;font:600 12px Inter,sans-serif;cursor:pointer;display:flex;align-items:center;gap:6px"><span style="font-size:9px">1</span>SINGLE</button>
+      <button style="height:34px;padding:0 16px;border-radius:6px;border:1px solid #2A2D34;background:#1B1E24;color:#C5C9D1;font:600 12px Inter,sans-serif;cursor:pointer">FORCE</button>
+      <button style="height:34px;padding:0 16px;border-radius:6px;border:1px solid #2A2D34;background:#1B1E24;color:#C5C9D1;font:600 12px Inter,sans-serif;cursor:pointer">AUTO</button>
+    </div>
+
+    <!-- right: actions -->
+    <div style="display:flex;align-items:center;gap:6px">
+      <button title="Сохранить осциллограмму" style="height:30px;padding:0 11px;border-radius:5px;border:1px solid #2A2D34;background:#1B1E24;color:#C5C9D1;font:500 11px Inter,sans-serif;cursor:pointer;display:flex;align-items:center;gap:6px"><svg width="13" height="13" viewBox="0 0 14 14"><rect x="1.5" y="1.5" width="11" height="11" rx="1.5" fill="none" stroke="#9AA0AC" stroke-width="1.3"/><rect x="4" y="1.5" width="6" height="4" fill="#9AA0AC"/></svg>Save</button>
+      <button title="Скриншот" style="height:30px;width:34px;border-radius:5px;border:1px solid #2A2D34;background:#1B1E24;cursor:pointer;display:flex;align-items:center;justify-content:center"><svg width="15" height="15" viewBox="0 0 16 16"><rect x="1" y="3.5" width="14" height="10" rx="2" fill="none" stroke="#9AA0AC" stroke-width="1.3"/><circle cx="8" cy="8.5" r="2.6" fill="none" stroke="#9AA0AC" stroke-width="1.3"/><rect x="5" y="2" width="6" height="2.2" rx="1" fill="#9AA0AC"/></svg></button>
+      <button title="Пресеты" style="height:30px;padding:0 11px;border-radius:5px;border:1px solid #2A2D34;background:#1B1E24;color:#C5C9D1;font:500 11px Inter,sans-serif;cursor:pointer">Presets</button>
+      <button onClick="{{ toggleScpi }}" title="SCPI терминал" style="{{ scpiBtnStyle }}"><span style="font:700 12px 'JetBrains Mono',monospace">&gt;_</span>SCPI</button>
+      <button title="Настройки" style="height:30px;width:34px;border-radius:5px;border:1px solid #2A2D34;background:#1B1E24;cursor:pointer;display:flex;align-items:center;justify-content:center"><svg width="15" height="15" viewBox="0 0 16 16"><circle cx="8" cy="8" r="2.4" fill="none" stroke="#9AA0AC" stroke-width="1.3"/><circle cx="8" cy="8" r="6" fill="none" stroke="#9AA0AC" stroke-width="1.3" stroke-dasharray="1.3 2.2"/></svg></button>
+    </div>
+  </div>
+
+  <!-- ===================== MAIN ROW ===================== -->
+  <div style="flex:1;display:flex;min-height:0">
+
+    <!-- ---------- CENTER: waveform + scpi ---------- -->
+    <div style="flex:1;display:flex;flex-direction:column;min-width:0;background:#0E0F12">
+
+      <!-- waveform area -->
+      <div style="flex:1;display:flex;flex-direction:column;padding:10px;min-height:0">
+        <div style="flex:1;position:relative;border:1px solid #2A2D34;border-radius:4px;background:#08090B;overflow:hidden">
+          <canvas ref="{{ setCanvas }}" style="position:absolute;inset:0;width:100%;height:100%;display:block"></canvas>
+
+          <!-- top-left readouts -->
+          <div style="position:absolute;top:9px;left:11px;display:flex;flex-direction:column;gap:4px;pointer-events:none">
+            <div style="display:flex;gap:6px">
+              <div style="display:flex;align-items:center;gap:6px;background:rgba(8,9,11,0.78);border:1px solid rgba(242,195,0,0.45);border-radius:3px;padding:2px 7px"><span style="width:10px;height:10px;border-radius:2px;background:#F2C300"></span><span style="font:600 11px 'JetBrains Mono',monospace;color:#F2C300">CH1 500mV</span><span style="font:500 10px 'JetBrains Mono',monospace;color:#9AA0AC">DC</span></div>
+              <div style="display:flex;align-items:center;gap:6px;background:rgba(8,9,11,0.78);border:1px solid rgba(35,200,230,0.45);border-radius:3px;padding:2px 7px"><span style="width:10px;height:10px;border-radius:2px;background:#23C8E6"></span><span style="font:600 11px 'JetBrains Mono',monospace;color:#23C8E6">CH2 1.00V</span><span style="font:500 10px 'JetBrains Mono',monospace;color:#9AA0AC">DC</span></div>
+            </div>
+            <div style="display:flex;gap:6px;font:600 11px 'JetBrains Mono',monospace">
+              <span style="background:rgba(8,9,11,0.78);border:1px solid #2A2D34;border-radius:3px;padding:2px 7px;color:#C5C9D1">Time 200µs/div</span>
+              <span style="background:rgba(8,9,11,0.78);border:1px solid #2A2D34;border-radius:3px;padding:2px 7px;color:#C5C9D1">1.0 GSa/s</span>
+              <span style="background:rgba(8,9,11,0.78);border:1px solid #2A2D34;border-radius:3px;padding:2px 7px;color:#C5C9D1">4K</span>
+            </div>
+          </div>
+
+          <!-- trigger status badge top-center -->
+          <div style="position:absolute;top:9px;left:50%;transform:translateX(-50%);pointer-events:none">
+            <div style="{{ trigBadgeStyle }}">{{ trigStatus }}</div>
+          </div>
+
+          <!-- top T-position marker -->
+          <div style="position:absolute;top:0;left:51%;pointer-events:none"><div style="width:0;height:0;border-left:6px solid transparent;border-right:6px solid transparent;border-top:8px solid #C5C9D1"></div></div>
+
+          <!-- left ground markers -->
+          <div style="position:absolute;left:1px;top:50%;transform:translateY(-50%);pointer-events:none"><div style="display:flex;align-items:center"><div style="width:0;height:0;border-top:6px solid transparent;border-bottom:6px solid transparent;border-left:9px solid #F2C300"></div><span style="position:absolute;left:1px;font:700 8px 'JetBrains Mono';color:#08090B">1</span></div></div>
+          <div style="position:absolute;left:1px;top:25%;transform:translateY(-50%);pointer-events:none"><div style="display:flex;align-items:center"><div style="width:0;height:0;border-top:6px solid transparent;border-bottom:6px solid transparent;border-left:9px solid #23C8E6"></div><span style="position:absolute;left:1px;font:700 8px 'JetBrains Mono';color:#08090B">2</span></div></div>
+
+          <!-- right trigger level arrow -->
+          <div style="position:absolute;right:1px;top:58%;transform:translateY(-50%);pointer-events:none"><div style="display:flex;align-items:center"><span style="position:absolute;right:1px;font:700 8px 'JetBrains Mono';color:#08090B;z-index:1">T</span><div style="width:0;height:0;border-top:6px solid transparent;border-bottom:6px solid transparent;border-right:9px solid #F2C300"></div></div></div>
+
+          <!-- cursors -->
+          <div style="position:absolute;top:0;bottom:0;left:34%;width:0;border-left:1px dashed rgba(255,255,255,0.55);pointer-events:none"><div style="position:absolute;top:4px;left:-6px;width:11px;height:11px;background:#0E0F12;border:1px solid #fff;border-radius:2px"></div></div>
+          <div style="position:absolute;top:0;bottom:0;left:62%;width:0;border-left:1px dashed rgba(255,255,255,0.55);pointer-events:none"><div style="position:absolute;top:4px;left:-6px;width:11px;height:11px;background:#0E0F12;border:1px solid #fff;border-radius:2px"></div></div>
+
+          <!-- cursor readout box -->
+          <div style="position:absolute;bottom:9px;right:11px;background:rgba(8,9,11,0.85);border:1px solid #2A2D34;border-radius:4px;padding:7px 10px;display:flex;flex-direction:column;gap:3px;pointer-events:none">
+            <div style="font:600 10px Inter,sans-serif;letter-spacing:.5px;color:#7A808C;text-transform:uppercase;margin-bottom:1px">Cursors X</div>
+            <div style="display:flex;justify-content:space-between;gap:18px;font:600 11px 'JetBrains Mono',monospace"><span style="color:#7A808C">ΔX</span><span style="color:#E6E9EF">560.0 µs</span></div>
+            <div style="display:flex;justify-content:space-between;gap:18px;font:600 11px 'JetBrains Mono',monospace"><span style="color:#7A808C">1/ΔX</span><span style="color:#E6E9EF">1.7857 kHz</span></div>
+            <div style="display:flex;justify-content:space-between;gap:18px;font:600 11px 'JetBrains Mono',monospace"><span style="color:#7A808C">ΔY</span><span style="color:#E6E9EF">2.48 V</span></div>
+          </div>
+        </div>
+
+        <!-- zoom strip (when zoom on) -->
+        <sc-if value="{{ zoomOn }}" hint-placeholder-val="{{ false }}">
+          <div style="height:64px;flex-shrink:0;margin-top:8px;position:relative;border:1px solid #2A2D34;border-radius:4px;background:#08090B;overflow:hidden">
+            <div style="position:absolute;top:5px;left:9px;font:600 10px Inter;letter-spacing:.5px;color:#7A808C;text-transform:uppercase">Zoom window · полная запись</div>
+            <div style="position:absolute;top:0;bottom:0;left:42%;width:14%;background:rgba(242,195,0,0.10);border-left:1px solid rgba(242,195,0,0.6);border-right:1px solid rgba(242,195,0,0.6)"></div>
+          </div>
+        </sc-if>
+      </div>
+
+      <!-- SCPI terminal -->
+      <sc-if value="{{ scpiOpen }}" hint-placeholder-val="{{ false }}">
+        <div style="height:230px;flex-shrink:0;border-top:1px solid #2A2D34;background:#0B0C0F;display:flex;flex-direction:column">
+          <div style="height:30px;flex-shrink:0;display:flex;align-items:center;justify-content:space-between;padding:0 12px;background:#16181D;border-bottom:1px solid #2A2D34">
+            <div style="display:flex;align-items:center;gap:8px"><span style="font:700 12px 'JetBrains Mono',monospace;color:#37D67A">&gt;_</span><span style="font:600 11px Inter,sans-serif;letter-spacing:.6px;color:#9AA0AC;text-transform:uppercase">SCPI Terminal</span></div>
+            <button onClick="{{ toggleScpi }}" style="background:none;border:none;color:#7A808C;cursor:pointer;font-size:16px;line-height:1">×</button>
+          </div>
+          <div style="flex:1;overflow-y:auto;padding:8px 12px;display:flex;flex-direction:column;gap:2px">
+            <sc-for list="{{ scpiLog }}" as="line" hint-placeholder-count="6">
+              <div style="font:500 12px 'JetBrains Mono',monospace;color:{{ line.color }};white-space:pre">{{ line.text }}</div>
+            </sc-for>
+          </div>
+          <div style="height:38px;flex-shrink:0;display:flex;align-items:center;gap:8px;padding:0 12px;border-top:1px solid #2A2D34">
+            <span style="font:700 13px 'JetBrains Mono',monospace;color:#37D67A">&gt;</span>
+            <input value=":MEAS:FREQ? CHAN1" style="flex:1;background:#0E0F12;border:1px solid #2A2D34;border-radius:4px;height:26px;padding:0 10px;font:500 12px 'JetBrains Mono',monospace;color:#E6E9EF;outline:none" />
+            <button style="height:26px;padding:0 16px;border-radius:4px;border:none;background:#37D67A;color:#08090B;font:700 11px Inter,sans-serif;cursor:pointer">Send</button>
+          </div>
+        </div>
+      </sc-if>
+    </div>
+
+    <!-- ---------- RIGHT DOCK ---------- -->
+    <div style="width:382px;flex-shrink:0;background:#13151A;border-left:1px solid #2A2D34;display:flex;flex-direction:column;min-height:0">
+      <!-- tab bar -->
+      <div style="height:38px;flex-shrink:0;display:flex;background:#16181D;border-bottom:1px solid #2A2D34">
+        <button onClick="{{ tabs.scope }}" style="{{ tabStyle.scope }}">Scope</button>
+        <button onClick="{{ tabs.generator }}" style="{{ tabStyle.generator }}">Generator</button>
+        <button onClick="{{ tabs.sweep }}" style="{{ tabStyle.sweep }}">Sweep</button>
+      </div>
+
+      <div style="flex:1;overflow-y:auto;min-height:0">
+
+        <!-- ============ SCOPE TAB ============ -->
+        <sc-if value="{{ tabScope }}" hint-placeholder-val="{{ true }}">
+        <div>
+
+          <!-- VERTICAL -->
+          <div style="border-bottom:1px solid #22252C">
+            <div onClick="{{ togglers.vertical }}" style="display:flex;align-items:center;justify-content:space-between;height:32px;padding:0 12px;cursor:pointer;background:#1B1E24"><span style="font:600 11px Inter;letter-spacing:.7px;color:#AEB4BF;text-transform:uppercase">Vertical</span><span style="color:#6E747F;font-size:10px">{{ chev.vertical }}</span></div>
+            <sc-if value="{{ exp.vertical }}" hint-placeholder-val="{{ true }}">
+            <div style="padding:10px 12px;display:flex;flex-direction:column;gap:12px">
+              <!-- CH1 -->
+              <div style="border:1px solid rgba(242,195,0,0.30);border-radius:6px;overflow:hidden">
+                <div style="display:flex;align-items:center;justify-content:space-between;padding:6px 9px;background:rgba(242,195,0,0.07);border-bottom:1px solid rgba(242,195,0,0.18)">
+                  <span style="font:700 12px Inter;color:#F2C300">CH1</span>
+                  <div style="display:flex;align-items:center;gap:7px;font:500 10px 'JetBrains Mono';color:#9AA0AC">DC · 10X<span style="width:30px;height:16px;border-radius:9px;background:#F2C300;position:relative;display:inline-block"><span style="position:absolute;top:2px;right:2px;width:12px;height:12px;border-radius:50%;background:#08090B"></span></span></div>
+                </div>
+                <div style="padding:8px 9px;display:flex;flex-direction:column;gap:7px">
+                  <div style="display:flex;align-items:center;gap:8px"><span style="font:500 11px Inter;color:#7A808C;width:62px">Scale</span><div style="display:flex;align-items:center;flex:1;background:#0E0F12;border:1px solid #2A2D34;border-radius:4px;height:26px"><span style="flex:1;text-align:center;font:600 12px 'JetBrains Mono';color:#E6E9EF">500 mV/div</span><div style="display:flex;flex-direction:column;border-left:1px solid #2A2D34;height:100%"><button style="width:22px;flex:1;border:none;border-bottom:1px solid #2A2D34;background:transparent;color:#7A808C;font-size:8px;cursor:pointer">▲</button><button style="width:22px;flex:1;border:none;background:transparent;color:#7A808C;font-size:8px;cursor:pointer">▼</button></div></div></div>
+                  <div style="display:flex;align-items:center;gap:8px"><span style="font:500 11px Inter;color:#7A808C;width:62px">Offset</span><div style="display:flex;align-items:center;flex:1;background:#0E0F12;border:1px solid #2A2D34;border-radius:4px;height:26px"><span style="flex:1;text-align:center;font:600 12px 'JetBrains Mono';color:#E6E9EF">0.00 V</span><div style="display:flex;flex-direction:column;border-left:1px solid #2A2D34;height:100%"><button style="width:22px;flex:1;border:none;border-bottom:1px solid #2A2D34;background:transparent;color:#7A808C;font-size:8px;cursor:pointer">▲</button><button style="width:22px;flex:1;border:none;background:transparent;color:#7A808C;font-size:8px;cursor:pointer">▼</button></div></div></div>
+                  <div style="display:flex;align-items:center;gap:8px"><span style="font:500 11px Inter;color:#7A808C;width:62px">Coupling</span><div style="display:flex;flex:1;border:1px solid #2A2D34;border-radius:4px;overflow:hidden"><button onClick="{{ setCoup1.DC }}" style="{{ coup1Seg.DC }}">DC</button><button onClick="{{ setCoup1.AC }}" style="{{ coup1Seg.AC }}">AC</button><button onClick="{{ setCoup1.GND }}" style="{{ coup1Seg.GND }}">GND</button></div></div>
+                  <div style="display:flex;align-items:center;gap:8px"><span style="font:500 11px Inter;color:#7A808C;width:62px">Probe</span><div style="display:flex;align-items:center;flex:1;background:#0E0F12;border:1px solid #2A2D34;border-radius:4px;height:26px;padding:0 10px;cursor:pointer"><span style="flex:1;font:600 12px 'JetBrains Mono';color:#E6E9EF">10X</span><span style="color:#5A606C;font-size:9px">▾</span></div></div>
+                  <div style="display:flex;gap:10px;flex-wrap:wrap;padding-top:1px">
+                    <label style="display:flex;align-items:center;gap:6px;font:500 11px Inter;color:#9AA0AC;cursor:pointer"><span style="width:14px;height:14px;border-radius:3px;border:1px solid #3A3F49;background:rgba(242,195,0,0.9);display:flex;align-items:center;justify-content:center;color:#08090B;font-size:9px;font-weight:700">✓</span>BW 20MHz</label>
+                    <label style="display:flex;align-items:center;gap:6px;font:500 11px Inter;color:#9AA0AC;cursor:pointer"><span style="width:14px;height:14px;border-radius:3px;border:1px solid #3A3F49;background:#0E0F12"></span>Invert</label>
+                    <label style="display:flex;align-items:center;gap:6px;font:500 11px Inter;color:#9AA0AC;cursor:pointer"><span style="width:14px;height:14px;border-radius:3px;border:1px solid #3A3F49;background:#0E0F12"></span>Fine</label>
+                  </div>
+                </div>
+              </div>
+              <!-- CH2 -->
+              <div style="border:1px solid rgba(35,200,230,0.30);border-radius:6px;overflow:hidden">
+                <div style="display:flex;align-items:center;justify-content:space-between;padding:6px 9px;background:rgba(35,200,230,0.07);border-bottom:1px solid rgba(35,200,230,0.18)">
+                  <span style="font:700 12px Inter;color:#23C8E6">CH2</span>
+                  <div style="display:flex;align-items:center;gap:7px;font:500 10px 'JetBrains Mono';color:#9AA0AC">DC · 10X<span style="width:30px;height:16px;border-radius:9px;background:#23C8E6;position:relative;display:inline-block"><span style="position:absolute;top:2px;right:2px;width:12px;height:12px;border-radius:50%;background:#08090B"></span></span></div>
+                </div>
+                <div style="padding:8px 9px;display:flex;flex-direction:column;gap:7px">
+                  <div style="display:flex;align-items:center;gap:8px"><span style="font:500 11px Inter;color:#7A808C;width:62px">Scale</span><div style="display:flex;align-items:center;flex:1;background:#0E0F12;border:1px solid #2A2D34;border-radius:4px;height:26px"><span style="flex:1;text-align:center;font:600 12px 'JetBrains Mono';color:#E6E9EF">1.00 V/div</span><div style="display:flex;flex-direction:column;border-left:1px solid #2A2D34;height:100%"><button style="width:22px;flex:1;border:none;border-bottom:1px solid #2A2D34;background:transparent;color:#7A808C;font-size:8px;cursor:pointer">▲</button><button style="width:22px;flex:1;border:none;background:transparent;color:#7A808C;font-size:8px;cursor:pointer">▼</button></div></div></div>
+                  <div style="display:flex;align-items:center;gap:8px"><span style="font:500 11px Inter;color:#7A808C;width:62px">Offset</span><div style="display:flex;align-items:center;flex:1;background:#0E0F12;border:1px solid #2A2D34;border-radius:4px;height:26px"><span style="flex:1;text-align:center;font:600 12px 'JetBrains Mono';color:#E6E9EF">+2.00 V</span><div style="display:flex;flex-direction:column;border-left:1px solid #2A2D34;height:100%"><button style="width:22px;flex:1;border:none;border-bottom:1px solid #2A2D34;background:transparent;color:#7A808C;font-size:8px;cursor:pointer">▲</button><button style="width:22px;flex:1;border:none;background:transparent;color:#7A808C;font-size:8px;cursor:pointer">▼</button></div></div></div>
+                  <div style="display:flex;align-items:center;gap:8px"><span style="font:500 11px Inter;color:#7A808C;width:62px">Coupling</span><div style="display:flex;flex:1;border:1px solid #2A2D34;border-radius:4px;overflow:hidden"><button onClick="{{ setCoup2.DC }}" style="{{ coup2Seg.DC }}">DC</button><button onClick="{{ setCoup2.AC }}" style="{{ coup2Seg.AC }}">AC</button><button onClick="{{ setCoup2.GND }}" style="{{ coup2Seg.GND }}">GND</button></div></div>
+                  <div style="display:flex;align-items:center;gap:8px"><span style="font:500 11px Inter;color:#7A808C;width:62px">Probe</span><div style="display:flex;align-items:center;flex:1;background:#0E0F12;border:1px solid #2A2D34;border-radius:4px;height:26px;padding:0 10px;cursor:pointer"><span style="flex:1;font:600 12px 'JetBrains Mono';color:#E6E9EF">10X</span><span style="color:#5A606C;font-size:9px">▾</span></div></div>
+                </div>
+              </div>
+            </div>
+            </sc-if>
+          </div>
+
+          <!-- HORIZONTAL -->
+          <div style="border-bottom:1px solid #22252C">
+            <div onClick="{{ togglers.horizontal }}" style="display:flex;align-items:center;justify-content:space-between;height:32px;padding:0 12px;cursor:pointer;background:#1B1E24"><span style="font:600 11px Inter;letter-spacing:.7px;color:#AEB4BF;text-transform:uppercase">Horizontal / Timebase</span><span style="color:#6E747F;font-size:10px">{{ chev.horizontal }}</span></div>
+            <sc-if value="{{ exp.horizontal }}" hint-placeholder-val="{{ true }}">
+            <div style="padding:10px 12px;display:flex;flex-direction:column;gap:8px">
+              <div style="display:flex;align-items:center;gap:8px"><span style="font:500 11px Inter;color:#7A808C;width:74px">Time/div</span><div style="display:flex;align-items:center;flex:1;background:#0E0F12;border:1px solid #2A2D34;border-radius:4px;height:26px"><span style="flex:1;text-align:center;font:600 12px 'JetBrains Mono';color:#E6E9EF">200 µs/div</span><div style="display:flex;flex-direction:column;border-left:1px solid #2A2D34;height:100%"><button style="width:22px;flex:1;border:none;border-bottom:1px solid #2A2D34;background:transparent;color:#7A808C;font-size:8px;cursor:pointer">▲</button><button style="width:22px;flex:1;border:none;background:transparent;color:#7A808C;font-size:8px;cursor:pointer">▼</button></div></div></div>
+              <div style="display:flex;align-items:center;gap:8px"><span style="font:500 11px Inter;color:#7A808C;width:74px">Position</span><div style="display:flex;align-items:center;flex:1;background:#0E0F12;border:1px solid #2A2D34;border-radius:4px;height:26px"><span style="flex:1;text-align:center;font:600 12px 'JetBrains Mono';color:#E6E9EF">0.000 s</span><div style="display:flex;flex-direction:column;border-left:1px solid #2A2D34;height:100%"><button style="width:22px;flex:1;border:none;border-bottom:1px solid #2A2D34;background:transparent;color:#7A808C;font-size:8px;cursor:pointer">▲</button><button style="width:22px;flex:1;border:none;background:transparent;color:#7A808C;font-size:8px;cursor:pointer">▼</button></div></div></div>
+              <div style="display:flex;align-items:center;gap:8px"><span style="font:500 11px Inter;color:#7A808C;width:74px">Mode</span><div style="display:flex;flex:1;border:1px solid #2A2D34;border-radius:4px;overflow:hidden"><button style="{{ segOnLit }}">Main</button><button style="{{ segOffLit }}">XY</button><button style="{{ segOffLit }}">Roll</button></div></div>
+              <div style="display:flex;align-items:center;gap:8px;padding-top:2px"><label style="display:flex;align-items:center;gap:7px;font:500 11px Inter;color:#9AA0AC;cursor:pointer" onClick="{{ toggleZoom }}"><span style="{{ zoomChkStyle }}">{{ zoomChk }}</span>Zoom window</label></div>
+            </div>
+            </sc-if>
+          </div>
+
+          <!-- TRIGGER -->
+          <div style="border-bottom:1px solid #22252C">
+            <div onClick="{{ togglers.trigger }}" style="display:flex;align-items:center;justify-content:space-between;height:32px;padding:0 12px;cursor:pointer;background:#1B1E24"><span style="font:600 11px Inter;letter-spacing:.7px;color:#AEB4BF;text-transform:uppercase">Trigger</span><span style="display:flex;align-items:center;gap:8px"><span style="font:600 10px 'JetBrains Mono';color:#F2C300">Edge · CH1</span><span style="color:#6E747F;font-size:10px">{{ chev.trigger }}</span></span></div>
+            <sc-if value="{{ exp.trigger }}" hint-placeholder-val="{{ true }}">
+            <div style="padding:10px 12px;display:flex;flex-direction:column;gap:8px">
+              <div style="display:flex;align-items:center;gap:8px"><span style="font:500 11px Inter;color:#7A808C;width:62px">Type</span><div style="display:flex;align-items:center;flex:1;background:#0E0F12;border:1px solid #2A2D34;border-radius:4px;height:26px;padding:0 10px;cursor:pointer"><span style="flex:1;font:600 12px Inter;color:#E6E9EF">Edge</span><span style="color:#5A606C;font-size:9px">▾</span></div></div>
+              <div style="display:flex;align-items:center;gap:8px"><span style="font:500 11px Inter;color:#7A808C;width:62px">Source</span><div style="display:flex;align-items:center;flex:1;background:#0E0F12;border:1px solid rgba(242,195,0,0.35);border-radius:4px;height:26px;padding:0 10px;cursor:pointer"><span style="width:9px;height:9px;border-radius:2px;background:#F2C300;margin-right:7px"></span><span style="flex:1;font:600 12px 'JetBrains Mono';color:#F2C300">CH1</span><span style="color:#5A606C;font-size:9px">▾</span></div></div>
+              <div style="display:flex;align-items:center;gap:8px"><span style="font:500 11px Inter;color:#7A808C;width:62px">Sweep</span><div style="display:flex;flex:1;border:1px solid #2A2D34;border-radius:4px;overflow:hidden"><button onClick="{{ setSweep.Auto }}" style="{{ sweepSeg.Auto }}">Auto</button><button onClick="{{ setSweep.Normal }}" style="{{ sweepSeg.Normal }}">Normal</button><button onClick="{{ setSweep.Single }}" style="{{ sweepSeg.Single }}">Single</button></div></div>
+              <div style="display:flex;align-items:center;gap:8px"><span style="font:500 11px Inter;color:#7A808C;width:62px">Slope</span><div style="display:flex;flex:1;border:1px solid #2A2D34;border-radius:4px;overflow:hidden"><button style="{{ segOnLit }}">Rising</button><button style="{{ segOffLit }}">Falling</button><button style="{{ segOffLit }}">Either</button></div></div>
+              <div style="display:flex;align-items:center;gap:8px"><span style="font:500 11px Inter;color:#7A808C;width:62px">Level</span><div style="display:flex;align-items:center;flex:1;background:#0E0F12;border:1px solid #2A2D34;border-radius:4px;height:26px"><span style="flex:1;text-align:center;font:600 12px 'JetBrains Mono';color:#E6E9EF">+820 mV</span><div style="display:flex;flex-direction:column;border-left:1px solid #2A2D34;height:100%"><button style="width:22px;flex:1;border:none;border-bottom:1px solid #2A2D34;background:transparent;color:#7A808C;font-size:8px;cursor:pointer">▲</button><button style="width:22px;flex:1;border:none;background:transparent;color:#7A808C;font-size:8px;cursor:pointer">▼</button></div></div><button style="height:26px;padding:0 9px;border:1px solid #2A2D34;background:#1B1E24;border-radius:4px;font:600 10px Inter;color:#C5C9D1;cursor:pointer;white-space:nowrap">50%</button></div>
+              <div style="display:flex;align-items:center;gap:8px"><span style="font:500 11px Inter;color:#7A808C;width:62px">Holdoff</span><div style="display:flex;align-items:center;flex:1;background:#0E0F12;border:1px solid #2A2D34;border-radius:4px;height:26px"><span style="flex:1;text-align:center;font:600 12px 'JetBrains Mono';color:#E6E9EF">100 ns</span><div style="display:flex;flex-direction:column;border-left:1px solid #2A2D34;height:100%"><button style="width:22px;flex:1;border:none;border-bottom:1px solid #2A2D34;background:transparent;color:#7A808C;font-size:8px;cursor:pointer">▲</button><button style="width:22px;flex:1;border:none;background:transparent;color:#7A808C;font-size:8px;cursor:pointer">▼</button></div></div></div>
+              <div style="font:500 10px Inter;color:#5A606C;padding-top:1px;line-height:1.4">Выбор шины (UART/CAN/LIN/I²C/SPI) раскрывает поля протокола: baud, data bits, parity, stop, polarity…</div>
+            </div>
+            </sc-if>
+          </div>
+
+          <!-- ACQUIRE -->
+          <div style="border-bottom:1px solid #22252C">
+            <div onClick="{{ togglers.acquire }}" style="display:flex;align-items:center;justify-content:space-between;height:32px;padding:0 12px;cursor:pointer;background:#1B1E24"><span style="font:600 11px Inter;letter-spacing:.7px;color:#AEB4BF;text-transform:uppercase">Acquire</span><span style="display:flex;align-items:center;gap:8px"><span style="font:600 10px 'JetBrains Mono';color:#6E747F">Normal · 4K</span><span style="color:#6E747F;font-size:10px">{{ chev.acquire }}</span></span></div>
+            <sc-if value="{{ exp.acquire }}" hint-placeholder-val="{{ false }}">
+            <div style="padding:10px 12px;display:flex;flex-direction:column;gap:8px">
+              <div style="display:flex;align-items:center;gap:8px"><span style="font:500 11px Inter;color:#7A808C;width:74px">Mode</span><div style="display:flex;align-items:center;flex:1;background:#0E0F12;border:1px solid #2A2D34;border-radius:4px;height:26px;padding:0 10px;cursor:pointer"><span style="flex:1;font:600 12px Inter;color:#E6E9EF">Normal</span><span style="color:#5A606C;font-size:9px">▾</span></div></div>
+              <div style="display:flex;align-items:center;gap:8px"><span style="font:500 11px Inter;color:#7A808C;width:74px">Mem depth</span><div style="display:flex;align-items:center;flex:1;background:#0E0F12;border:1px solid #2A2D34;border-radius:4px;height:26px;padding:0 10px;cursor:pointer"><span style="flex:1;font:600 12px 'JetBrains Mono';color:#E6E9EF">4K</span><span style="color:#5A606C;font-size:9px">▾</span></div></div>
+              <div style="display:flex;align-items:center;justify-content:space-between;background:#0E0F12;border:1px solid #2A2D34;border-radius:4px;padding:6px 10px"><span style="font:500 11px Inter;color:#7A808C">Sample rate</span><span style="font:600 12px 'JetBrains Mono';color:#37D67A">1.0 GSa/s</span></div>
+            </div>
+            </sc-if>
+          </div>
+
+          <!-- MEASURE -->
+          <div style="border-bottom:1px solid #22252C">
+            <div onClick="{{ togglers.measure }}" style="display:flex;align-items:center;justify-content:space-between;height:32px;padding:0 12px;cursor:pointer;background:#1B1E24"><span style="font:600 11px Inter;letter-spacing:.7px;color:#AEB4BF;text-transform:uppercase">Measure</span><span style="color:#6E747F;font-size:10px">{{ chev.measure }}</span></div>
+            <sc-if value="{{ exp.measure }}" hint-placeholder-val="{{ true }}">
+            <div style="padding:10px 12px;display:flex;flex-direction:column;gap:8px">
+              <div style="display:flex;gap:8px">
+                <div style="display:flex;align-items:center;flex:1;background:#0E0F12;border:1px solid #2A2D34;border-radius:4px;height:26px;padding:0 10px;cursor:pointer"><span style="font:500 10px Inter;color:#7A808C;margin-right:6px">Src</span><span style="flex:1;font:600 12px 'JetBrains Mono';color:#F2C300">CH1</span><span style="color:#5A606C;font-size:9px">▾</span></div>
+                <button style="flex:1.2;height:26px;background:rgba(55,214,122,0.10);border:1px solid #2F4A3C;border-radius:4px;font:600 11px Inter;color:#37D67A;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:6px"><span style="font-size:14px;line-height:1">+</span>Add measurement</button>
+              </div>
+              <div style="border:1px solid #2A2D34;border-radius:5px;overflow:hidden">
+                <div style="display:flex;padding:5px 9px;background:#16181D;font:600 9px Inter;letter-spacing:.5px;color:#6E747F;text-transform:uppercase"><span style="width:64px">Type</span><span style="width:52px">Source</span><span style="flex:1;text-align:right">Value</span></div>
+                <sc-for list="{{ measures }}" as="m" hint-placeholder-count="6">
+                  <div style="display:flex;align-items:center;padding:5px 9px;border-top:1px solid #1E2128"><span style="width:64px;font:600 11px Inter;color:#C5C9D1">{{ m.label }}</span><span style="width:52px;font:600 11px 'JetBrains Mono';color:{{ m.color }}">{{ m.src }}</span><span style="flex:1;text-align:right;font:600 12px 'JetBrains Mono';color:#E6E9EF">{{ m.value }}</span></div>
+                </sc-for>
+              </div>
+            </div>
+            </sc-if>
+          </div>
+
+          <!-- MATH -->
+          <div style="border-bottom:1px solid #22252C">
+            <div onClick="{{ togglers.math }}" style="display:flex;align-items:center;justify-content:space-between;height:32px;padding:0 12px;cursor:pointer;background:#1B1E24"><span style="font:600 11px Inter;letter-spacing:.7px;color:#AEB4BF;text-transform:uppercase">Math / FFT</span><span style="display:flex;align-items:center;gap:8px"><span style="width:9px;height:9px;border-radius:2px;background:#C77DFF"></span><span style="color:#6E747F;font-size:10px">{{ chev.math }}</span></span></div>
+            <sc-if value="{{ exp.math }}" hint-placeholder-val="{{ false }}">
+            <div style="padding:10px 12px;display:flex;flex-direction:column;gap:8px">
+              <div style="display:flex;align-items:center;gap:8px"><span style="font:500 11px Inter;color:#7A808C;width:70px">Operation</span><div style="display:flex;align-items:center;flex:1;background:#0E0F12;border:1px solid rgba(199,125,255,0.35);border-radius:4px;height:26px;padding:0 10px;cursor:pointer"><span style="flex:1;font:600 12px 'JetBrains Mono';color:#C77DFF">FFT</span><span style="color:#5A606C;font-size:9px">▾</span></div></div>
+              <div style="display:flex;align-items:center;gap:8px"><span style="font:500 11px Inter;color:#7A808C;width:70px">Window</span><div style="display:flex;align-items:center;flex:1;background:#0E0F12;border:1px solid #2A2D34;border-radius:4px;height:26px;padding:0 10px;cursor:pointer"><span style="flex:1;font:600 12px Inter;color:#E6E9EF">Hanning</span><span style="color:#5A606C;font-size:9px">▾</span></div></div>
+              <div style="display:flex;gap:8px"><div style="flex:1;display:flex;align-items:center;background:#0E0F12;border:1px solid #2A2D34;border-radius:4px;height:26px;padding:0 8px"><span style="font:500 10px Inter;color:#7A808C;margin-right:6px">Units</span><span style="flex:1;font:600 11px 'JetBrains Mono';color:#E6E9EF">dBVrms</span></div><div style="flex:1;display:flex;align-items:center;background:#0E0F12;border:1px solid #2A2D34;border-radius:4px;height:26px;padding:0 8px"><span style="font:500 10px Inter;color:#7A808C;margin-right:6px">Hz/div</span><span style="flex:1;font:600 11px 'JetBrains Mono';color:#E6E9EF">10 kHz</span></div></div>
+            </div>
+            </sc-if>
+          </div>
+
+          <!-- CURSORS -->
+          <div style="border-bottom:1px solid #22252C">
+            <div onClick="{{ togglers.cursors }}" style="display:flex;align-items:center;justify-content:space-between;height:32px;padding:0 12px;cursor:pointer;background:#1B1E24"><span style="font:600 11px Inter;letter-spacing:.7px;color:#AEB4BF;text-transform:uppercase">Cursors</span><span style="display:flex;align-items:center;gap:8px"><span style="font:600 10px 'JetBrains Mono';color:#6E747F">Manual · X</span><span style="color:#6E747F;font-size:10px">{{ chev.cursors }}</span></span></div>
+            <sc-if value="{{ exp.cursors }}" hint-placeholder-val="{{ false }}">
+            <div style="padding:10px 12px;display:flex;flex-direction:column;gap:8px">
+              <div style="display:flex;align-items:center;gap:8px"><span style="font:500 11px Inter;color:#7A808C;width:54px">Mode</span><div style="display:flex;flex:1;border:1px solid #2A2D34;border-radius:4px;overflow:hidden"><button style="{{ segOffLit }}">Off</button><button style="{{ segOnLit }}">Manual</button><button style="{{ segOffLit }}">Track</button></div></div>
+              <div style="display:flex;align-items:center;gap:8px"><span style="font:500 11px Inter;color:#7A808C;width:54px">Type</span><div style="display:flex;flex:1;border:1px solid #2A2D34;border-radius:4px;overflow:hidden"><button style="{{ segOnLit }}">X</button><button style="{{ segOffLit }}">Y</button><button style="{{ segOffLit }}">XY</button></div></div>
+            </div>
+            </sc-if>
+          </div>
+
+          <!-- DISPLAY -->
+          <div style="border-bottom:1px solid #22252C">
+            <div onClick="{{ togglers.display }}" style="display:flex;align-items:center;justify-content:space-between;height:32px;padding:0 12px;cursor:pointer;background:#1B1E24"><span style="font:600 11px Inter;letter-spacing:.7px;color:#AEB4BF;text-transform:uppercase">Display</span><span style="color:#6E747F;font-size:10px">{{ chev.display }}</span></div>
+            <sc-if value="{{ exp.display }}" hint-placeholder-val="{{ false }}">
+            <div style="padding:10px 12px;display:flex;flex-direction:column;gap:9px">
+              <div style="display:flex;align-items:center;gap:8px"><span style="font:500 11px Inter;color:#7A808C;width:74px">Waveform</span><div style="display:flex;flex:1;border:1px solid #2A2D34;border-radius:4px;overflow:hidden"><button style="{{ segOnLit }}">Vectors</button><button style="{{ segOffLit }}">Dots</button></div></div>
+              <div style="display:flex;align-items:center;gap:8px"><span style="font:500 11px Inter;color:#7A808C;width:74px">Grid</span><div style="display:flex;flex:1;border:1px solid #2A2D34;border-radius:4px;overflow:hidden"><button style="{{ segOnLit }}">Full</button><button style="{{ segOffLit }}">Dotted</button><button style="{{ segOffLit }}">Off</button></div></div>
+              <div style="display:flex;align-items:center;gap:8px"><span style="font:500 11px Inter;color:#7A808C;width:74px">Intensity</span><div style="flex:1;height:5px;border-radius:3px;background:#0E0F12;border:1px solid #2A2D34;position:relative"><div style="position:absolute;left:0;top:0;bottom:0;width:72%;background:#37D67A;border-radius:3px"></div><div style="position:absolute;left:72%;top:50%;transform:translate(-50%,-50%);width:12px;height:12px;border-radius:50%;background:#E6E9EF"></div></div></div>
+            </div>
+            </sc-if>
+          </div>
+
+        </div>
+        </sc-if>
+
+        <!-- ============ GENERATOR TAB ============ -->
+        <sc-if value="{{ tabGen }}" hint-placeholder-val="{{ false }}">
+        <div style="padding:12px;display:flex;flex-direction:column;gap:12px">
+          <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 12px;border:1px solid #2A2D34;border-radius:7px;background:#1B1E24">
+            <div><div style="font:700 13px Inter;color:#E6E9EF">AWG Output</div><div style="font:500 10px 'JetBrains Mono';color:#6E747F">50 Ω · CH OUT</div></div>
+            <button onClick="{{ toggleGen }}" style="{{ genToggleStyle }}"><span style="width:34px;height:18px;border-radius:10px;background:{{ genTrackColor }};position:relative;display:inline-block;margin-right:8px"><span style="position:absolute;top:2px;{{ genKnobSide }}:2px;width:14px;height:14px;border-radius:50%;background:#fff"></span></span>{{ genStateLabel }}</button>
+          </div>
+
+          <div>
+            <div style="font:600 10px Inter;letter-spacing:.6px;color:#7A808C;text-transform:uppercase;margin-bottom:7px">Waveform</div>
+            <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:6px">
+              <button onClick="{{ setGenWave.Sine }}" style="{{ waveTile.Sine }}">∿<span style="font:600 9px Inter">Sine</span></button>
+              <button onClick="{{ setGenWave.Square }}" style="{{ waveTile.Square }}">⊓<span style="font:600 9px Inter">Square</span></button>
+              <button onClick="{{ setGenWave.Ramp }}" style="{{ waveTile.Ramp }}">◺<span style="font:600 9px Inter">Ramp</span></button>
+              <button onClick="{{ setGenWave.Pulse }}" style="{{ waveTile.Pulse }}">⊓<span style="font:600 9px Inter">Pulse</span></button>
+              <button onClick="{{ setGenWave.Noise }}" style="{{ waveTile.Noise }}">≋<span style="font:600 9px Inter">Noise</span></button>
+              <button onClick="{{ setGenWave.DC }}" style="{{ waveTile.DC }}">—<span style="font:600 9px Inter">DC</span></button>
+              <button onClick="{{ setGenWave.Arb1 }}" style="{{ waveTile.Arb1 }}">⤴<span style="font:600 9px Inter">Arb1</span></button>
+              <button onClick="{{ setGenWave.Arb2 }}" style="{{ waveTile.Arb2 }}">⤴<span style="font:600 9px Inter">Arb2</span></button>
+            </div>
+          </div>
+
+          <div style="display:flex;flex-direction:column;gap:7px">
+            <div style="display:flex;align-items:center;gap:8px"><span style="font:500 11px Inter;color:#7A808C;width:74px">Frequency</span><div style="display:flex;align-items:center;flex:1;background:#0E0F12;border:1px solid #2A2D34;border-radius:4px;height:30px"><span style="flex:1;text-align:center;font:700 14px 'JetBrains Mono';color:#37D67A">1.000 kHz</span><div style="display:flex;flex-direction:column;border-left:1px solid #2A2D34;height:100%"><button style="width:22px;flex:1;border:none;border-bottom:1px solid #2A2D34;background:transparent;color:#7A808C;font-size:8px;cursor:pointer">▲</button><button style="width:22px;flex:1;border:none;background:transparent;color:#7A808C;font-size:8px;cursor:pointer">▼</button></div></div></div>
+            <div style="display:flex;align-items:center;gap:8px"><span style="font:500 11px Inter;color:#7A808C;width:74px">Amplitude</span><div style="display:flex;align-items:center;flex:1;background:#0E0F12;border:1px solid #2A2D34;border-radius:4px;height:26px"><span style="flex:1;text-align:center;font:600 12px 'JetBrains Mono';color:#E6E9EF">2.000 Vpp</span><div style="display:flex;flex-direction:column;border-left:1px solid #2A2D34;height:100%"><button style="width:22px;flex:1;border:none;border-bottom:1px solid #2A2D34;background:transparent;color:#7A808C;font-size:8px;cursor:pointer">▲</button><button style="width:22px;flex:1;border:none;background:transparent;color:#7A808C;font-size:8px;cursor:pointer">▼</button></div></div></div>
+            <div style="display:flex;align-items:center;gap:8px"><span style="font:500 11px Inter;color:#7A808C;width:74px">Offset</span><div style="display:flex;align-items:center;flex:1;background:#0E0F12;border:1px solid #2A2D34;border-radius:4px;height:26px"><span style="flex:1;text-align:center;font:600 12px 'JetBrains Mono';color:#E6E9EF">0.00 V</span><div style="display:flex;flex-direction:column;border-left:1px solid #2A2D34;height:100%"><button style="width:22px;flex:1;border:none;border-bottom:1px solid #2A2D34;background:transparent;color:#7A808C;font-size:8px;cursor:pointer">▲</button><button style="width:22px;flex:1;border:none;background:transparent;color:#7A808C;font-size:8px;cursor:pointer">▼</button></div></div></div>
+            <div style="display:flex;align-items:center;gap:8px"><span style="font:500 11px Inter;color:#7A808C;width:74px">Duty</span><div style="display:flex;align-items:center;flex:1;background:#0E0F12;border:1px solid #2A2D34;border-radius:4px;height:26px"><span style="flex:1;text-align:center;font:600 12px 'JetBrains Mono';color:#E6E9EF">50.0 %</span><div style="display:flex;flex-direction:column;border-left:1px solid #2A2D34;height:100%"><button style="width:22px;flex:1;border:none;border-bottom:1px solid #2A2D34;background:transparent;color:#7A808C;font-size:8px;cursor:pointer">▲</button><button style="width:22px;flex:1;border:none;background:transparent;color:#7A808C;font-size:8px;cursor:pointer">▼</button></div></div></div>
+          </div>
+
+          <div style="border:1px solid #2A2D34;border-radius:7px;overflow:hidden">
+            <div style="display:flex;align-items:center;justify-content:space-between;padding:7px 11px;background:#1B1E24"><span style="font:600 11px Inter;letter-spacing:.6px;color:#AEB4BF;text-transform:uppercase">Modulation</span><span style="width:30px;height:16px;border-radius:9px;background:#2A2D34;position:relative;display:inline-block"><span style="position:absolute;top:2px;left:2px;width:12px;height:12px;border-radius:50%;background:#6E747F"></span></span></div>
+            <div style="padding:9px 11px;display:flex;flex-direction:column;gap:7px;opacity:.55">
+              <div style="display:flex;gap:8px"><div style="flex:1;display:flex;align-items:center;background:#0E0F12;border:1px solid #2A2D34;border-radius:4px;height:24px;padding:0 8px"><span style="font:500 10px Inter;color:#7A808C;margin-right:6px">Type</span><span style="flex:1;font:600 11px Inter;color:#E6E9EF">AM</span></div><div style="flex:1;display:flex;align-items:center;background:#0E0F12;border:1px solid #2A2D34;border-radius:4px;height:24px;padding:0 8px"><span style="font:500 10px Inter;color:#7A808C;margin-right:6px">Wave</span><span style="flex:1;font:600 11px Inter;color:#E6E9EF">Sine</span></div></div>
+              <div style="display:flex;gap:8px"><div style="flex:1;display:flex;align-items:center;background:#0E0F12;border:1px solid #2A2D34;border-radius:4px;height:24px;padding:0 8px"><span style="font:500 10px Inter;color:#7A808C;margin-right:6px">Freq</span><span style="flex:1;font:600 11px 'JetBrains Mono';color:#E6E9EF">100 Hz</span></div><div style="flex:1;display:flex;align-items:center;background:#0E0F12;border:1px solid #2A2D34;border-radius:4px;height:24px;padding:0 8px"><span style="font:500 10px Inter;color:#7A808C;margin-right:6px">Depth</span><span style="flex:1;font:600 11px 'JetBrains Mono';color:#E6E9EF">80 %</span></div></div>
+            </div>
+          </div>
+
+          <div style="border:1px solid #2A2D34;border-radius:7px;overflow:hidden">
+            <div style="display:flex;align-items:center;justify-content:space-between;padding:7px 11px;background:#1B1E24"><span style="font:600 11px Inter;letter-spacing:.6px;color:#AEB4BF;text-transform:uppercase">Burst</span><span style="width:30px;height:16px;border-radius:9px;background:#2A2D34;position:relative;display:inline-block"><span style="position:absolute;top:2px;left:2px;width:12px;height:12px;border-radius:50%;background:#6E747F"></span></span></div>
+            <div style="padding:9px 11px;display:flex;gap:8px;align-items:center;opacity:.55"><div style="flex:1;display:flex;align-items:center;background:#0E0F12;border:1px solid #2A2D34;border-radius:4px;height:24px;padding:0 8px"><span style="font:500 10px Inter;color:#7A808C;margin-right:6px">Type</span><span style="flex:1;font:600 11px Inter;color:#E6E9EF">N-Cycle</span></div><div style="flex:1;display:flex;align-items:center;background:#0E0F12;border:1px solid #2A2D34;border-radius:4px;height:24px;padding:0 8px"><span style="font:500 10px Inter;color:#7A808C;margin-right:6px">Cycles</span><span style="flex:1;font:600 11px 'JetBrains Mono';color:#E6E9EF">5</span></div><button style="height:24px;padding:0 12px;border:1px solid #6A521E;background:rgba(245,166,35,0.1);color:#F5A623;border-radius:4px;font:600 10px Inter;cursor:pointer">Trig</button></div>
+          </div>
+        </div>
+        </sc-if>
+
+        <!-- ============ SWEEP TAB ============ -->
+        <sc-if value="{{ tabSweep }}" hint-placeholder-val="{{ false }}">
+        <div style="padding:12px;display:flex;flex-direction:column;gap:10px">
+          <div style="font:600 11px Inter;letter-spacing:.6px;color:#AEB4BF;text-transform:uppercase">Sweep / Multi-capture</div>
+          <div style="display:flex;align-items:center;gap:8px"><span style="font:500 11px Inter;color:#7A808C;width:84px">Parameter</span><div style="display:flex;align-items:center;flex:1;background:#0E0F12;border:1px solid #2A2D34;border-radius:4px;height:26px;padding:0 10px;cursor:pointer"><span style="flex:1;font:600 12px Inter;color:#E6E9EF">Gen Frequency</span><span style="color:#5A606C;font-size:9px">▾</span></div></div>
+          <div style="display:flex;gap:8px">
+            <div style="flex:1"><div style="font:500 10px Inter;color:#7A808C;margin-bottom:4px">Start</div><div style="display:flex;align-items:center;background:#0E0F12;border:1px solid #2A2D34;border-radius:4px;height:26px;padding:0 9px"><span style="font:600 11px 'JetBrains Mono';color:#E6E9EF">100 Hz</span></div></div>
+            <div style="flex:1"><div style="font:500 10px Inter;color:#7A808C;margin-bottom:4px">Stop</div><div style="display:flex;align-items:center;background:#0E0F12;border:1px solid #2A2D34;border-radius:4px;height:26px;padding:0 9px"><span style="font:600 11px 'JetBrains Mono';color:#E6E9EF">100 kHz</span></div></div>
+            <div style="flex:1"><div style="font:500 10px Inter;color:#7A808C;margin-bottom:4px">Step</div><div style="display:flex;align-items:center;background:#0E0F12;border:1px solid #2A2D34;border-radius:4px;height:26px;padding:0 9px"><span style="font:600 11px 'JetBrains Mono';color:#E6E9EF">1 kHz</span></div></div>
+          </div>
+          <div style="display:flex;gap:8px">
+            <div style="flex:1"><div style="font:500 10px Inter;color:#7A808C;margin-bottom:4px">Dwell</div><div style="display:flex;align-items:center;background:#0E0F12;border:1px solid #2A2D34;border-radius:4px;height:26px;padding:0 9px"><span style="font:600 11px 'JetBrains Mono';color:#E6E9EF">200 ms</span></div></div>
+            <div style="flex:1"><div style="font:500 10px Inter;color:#7A808C;margin-bottom:4px">Format</div><div style="display:flex;align-items:center;background:#0E0F12;border:1px solid #2A2D34;border-radius:4px;height:26px;padding:0 9px;cursor:pointer"><span style="flex:1;font:600 11px Inter;color:#E6E9EF">CSV</span><span style="color:#5A606C;font-size:9px">▾</span></div></div>
+          </div>
+          <div><div style="font:500 10px Inter;color:#7A808C;margin-bottom:4px">Output folder</div><div style="display:flex;align-items:center;background:#0E0F12;border:1px solid #2A2D34;border-radius:4px;height:26px;padding:0 9px"><span style="flex:1;font:500 11px 'JetBrains Mono';color:#C5C9D1">C:\Captures\run_07\</span><span style="font-size:11px;color:#7A808C">📁</span></div></div>
+          <div style="margin-top:2px"><div style="display:flex;justify-content:space-between;font:600 11px 'JetBrains Mono';margin-bottom:5px"><span style="color:#9AA0AC">Прогресс</span><span style="color:#37D67A">42 / 100</span></div><div style="height:8px;border-radius:4px;background:#0E0F12;border:1px solid #2A2D34;overflow:hidden"><div style="width:42%;height:100%;background:#37D67A"></div></div></div>
+          <div style="display:flex;gap:8px;margin-top:2px"><button style="flex:1;height:32px;background:rgba(229,72,77,0.12);border:1px solid #5A2A2C;border-radius:5px;font:700 12px Inter;color:#E5484D;cursor:pointer">Stop</button><button style="flex:1;height:32px;background:rgba(55,214,122,0.12);border:1px solid #2F4A3C;border-radius:5px;font:700 12px Inter;color:#37D67A;cursor:pointer">Start</button></div>
+        </div>
+        </sc-if>
+
+      </div>
+    </div>
+  </div>
+
+  <!-- ===================== STATUS BAR ===================== -->
+  <div style="height:28px;flex-shrink:0;display:flex;align-items:center;padding:0 12px;gap:0;background:#16181D;border-top:1px solid #2A2D34;font:500 11px 'JetBrains Mono',monospace">
+    <span style="display:flex;align-items:center;gap:6px;padding-right:14px"><span style="width:6px;height:6px;border-radius:50%;background:#37D67A"></span><span style="color:#37D67A">Connected</span></span>
+    <span style="padding:0 14px;border-left:1px solid #2A2D34;color:#9AA0AC">Hantek DSO2D15</span>
+    <span style="padding:0 14px;border-left:1px solid #2A2D34;color:#9AA0AC">1.0 GSa/s</span>
+    <span style="padding:0 14px;border-left:1px solid #2A2D34;color:#9AA0AC">Mem 4K</span>
+    <span style="padding:0 14px;border-left:1px solid #2A2D34;color:{{ trigStatusColor }}">Trig: {{ trigStatus }}</span>
+    <span style="flex:1"></span>
+    <span style="color:#6E747F">Waveform saved → capture_001.csv</span>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script>
+class Component extends DCLogic {
+  state = {
+    running: true,
+    activeTab: 'scope',
+    scpiOpen: false,
+    zoomOn: false,
+    coup1: 'DC',
+    coup2: 'DC',
+    sweep: 'Auto',
+    genOn: true,
+    genWave: 'Sine',
+    exp: { vertical:true, horizontal:true, trigger:true, acquire:false, measure:true, math:false, cursors:false, display:false }
+  };
+  phase = 0;
+
+  setCanvas = (el) => { this.canvasEl = el; };
+
+  componentDidMount() {
+    const tick = () => {
+      if (this.state.running) this.phase += 0.035;
+      this.draw();
+      this._raf = requestAnimationFrame(tick);
+    };
+    tick();
+  }
+  componentWillUnmount() { if (this._raf) cancelAnimationFrame(this._raf); }
+
+  toggleRun = () => this.setState(s => ({ running: !s.running }));
+  toggleScpi = () => this.setState(s => ({ scpiOpen: !s.scpiOpen }));
+  toggleZoom = () => this.setState(s => ({ zoomOn: !s.zoomOn }));
+  toggleGen = () => this.setState(s => ({ genOn: !s.genOn }));
+  togglePanel = (k) => this.setState(s => ({ exp: { ...s.exp, [k]: !s.exp[k] } }));
+
+  rgba(hex, a) {
+    const n = parseInt(hex.slice(1), 16);
+    return `rgba(${(n>>16)&255},${(n>>8)&255},${n&255},${a})`;
+  }
+
+  buildSeg(options, active, color) {
+    const o = {};
+    options.forEach(op => {
+      const on = op === active;
+      o[op] = {
+        flex: '1', height: '24px', display: 'flex', alignItems: 'center', justifyContent: 'center',
+        font: '600 11px Inter, sans-serif', cursor: 'pointer', border: 'none', whiteSpace: 'nowrap',
+        background: on ? (color ? this.rgba(color, 0.16) : '#2D313A') : 'transparent',
+        color: on ? (color || '#E6E9EF') : '#7A808C',
+        boxShadow: on && color ? 'inset 0 0 0 1px ' + this.rgba(color, 0.55) : 'none'
+      };
+    });
+    return o;
+  }
+  mkSetters(options, key) {
+    const o = {};
+    options.forEach(op => { o[op] = () => this.setState({ [key]: op }); });
+    return o;
+  }
+
+  draw() {
+    const c = this.canvasEl;
+    if (!c) return;
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    const w = c.clientWidth, h = c.clientHeight;
+    if (!w || !h) return;
+    if (c.width !== Math.round(w * dpr)) { c.width = Math.round(w * dpr); c.height = Math.round(h * dpr); }
+    const ctx = c.getContext('2d');
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, w, h);
+
+    const cols = 14, rows = 8, dw = w / cols, dh = h / rows;
+    const cx = w / 2, cy = h / 2;
+
+    // minor grid
+    ctx.lineWidth = 1;
+    ctx.strokeStyle = 'rgba(255,255,255,0.05)';
+    ctx.beginPath();
+    for (let i = 1; i < cols; i++) { ctx.moveTo(Math.round(i*dw)+0.5, 0); ctx.lineTo(Math.round(i*dw)+0.5, h); }
+    for (let j = 1; j < rows; j++) { ctx.moveTo(0, Math.round(j*dh)+0.5); ctx.lineTo(w, Math.round(j*dh)+0.5); }
+    ctx.stroke();
+
+    // center cross
+    ctx.strokeStyle = 'rgba(255,255,255,0.16)';
+    ctx.beginPath();
+    ctx.moveTo(Math.round(cx)+0.5, 0); ctx.lineTo(Math.round(cx)+0.5, h);
+    ctx.moveTo(0, Math.round(cy)+0.5); ctx.lineTo(w, Math.round(cy)+0.5);
+    ctx.stroke();
+
+    // ticks on center axes (5 sub-div)
+    ctx.strokeStyle = 'rgba(255,255,255,0.28)';
+    ctx.beginPath();
+    const sx = dw / 5;
+    for (let x = 0; x <= w; x += sx) { ctx.moveTo(x+0.5, cy-4); ctx.lineTo(x+0.5, cy+4); }
+    const sy = dh / 5;
+    for (let y = 0; y <= h; y += sy) { ctx.moveTo(cx-4, y+0.5); ctx.lineTo(cx+4, y+0.5); }
+    ctx.stroke();
+
+    // border
+    ctx.strokeStyle = 'rgba(255,255,255,0.12)';
+    ctx.strokeRect(0.5, 0.5, w-1, h-1);
+
+    const ph = this.phase;
+    // CH1 sine, centered
+    this.drawTrace(ctx, w, '#F2C300', (t) => cy + Math.sin(t * 2*Math.PI * 7 + ph) * (2.0 * dh));
+    // CH2 square, offset +2 div up
+    this.drawTrace(ctx, w, '#23C8E6', (t) => {
+      const s = Math.sin(t * 2*Math.PI * 4 + ph * 0.8);
+      return (cy - 2*dh) - (s >= 0 ? 1 : -1) * (1.35 * dh);
+    });
+  }
+
+  drawTrace(ctx, w, color, fn) {
+    ctx.save();
+    ctx.shadowColor = color;
+    ctx.shadowBlur = 7;
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 1.7;
+    ctx.lineJoin = 'round';
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    const N = 720;
+    for (let i = 0; i <= N; i++) {
+      const t = i / N, x = t * w, y = fn(t);
+      if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+    }
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  renderVals() {
+    const s = this.state;
+    const exp = s.exp;
+
+    const runBtnStyle = s.running
+      ? { height:'34px', padding:'0 26px', borderRadius:'6px', border:'1px solid #5A2A2C', background:'rgba(229,72,77,0.16)', color:'#E5484D', font:'700 13px Inter, sans-serif', cursor:'pointer', display:'flex', alignItems:'center', gap:'8px', minWidth:'120px', justifyContent:'center' }
+      : { height:'34px', padding:'0 26px', borderRadius:'6px', border:'1px solid #2F4A3C', background:'rgba(55,214,122,0.16)', color:'#37D67A', font:'700 13px Inter, sans-serif', cursor:'pointer', display:'flex', alignItems:'center', gap:'8px', minWidth:'120px', justifyContent:'center' };
+    const runLabel = s.running ? '■  STOP' : '▶  RUN';
+
+    const scpiBase = { height:'30px', padding:'0 11px', borderRadius:'5px', cursor:'pointer', display:'flex', alignItems:'center', gap:'6px', font:'600 11px Inter, sans-serif' };
+    const scpiBtnStyle = s.scpiOpen
+      ? { ...scpiBase, border:'1px solid #2F4A3C', background:'rgba(55,214,122,0.14)', color:'#37D67A' }
+      : { ...scpiBase, border:'1px solid #2A2D34', background:'#1B1E24', color:'#C5C9D1' };
+
+    // tabs
+    const tabBase = (on) => ({ flex:'1', display:'flex', alignItems:'center', justifyContent:'center', border:'none', cursor:'pointer', font:'600 12px Inter, sans-serif', background:on?'#13151A':'transparent', color:on?'#E6E9EF':'#7A808C', borderBottom:on?'2px solid #37D67A':'2px solid transparent' });
+    const tabStyle = { scope: tabBase(s.activeTab==='scope'), generator: tabBase(s.activeTab==='generator'), sweep: tabBase(s.activeTab==='sweep') };
+    const tabs = { scope:()=>this.setState({activeTab:'scope'}), generator:()=>this.setState({activeTab:'generator'}), sweep:()=>this.setState({activeTab:'sweep'}) };
+
+    // panel togglers + chevrons
+    const togglers = {}; const chev = {};
+    Object.keys(exp).forEach(k => { togglers[k] = () => this.togglePanel(k); chev[k] = exp[k] ? '▾' : '▸'; });
+
+    // segmented
+    const coup1Seg = this.buildSeg(['DC','AC','GND'], s.coup1, '#F2C300');
+    const coup2Seg = this.buildSeg(['DC','AC','GND'], s.coup2, '#23C8E6');
+    const sweepSeg = this.buildSeg(['Auto','Normal','Single'], s.sweep, '#F5A623');
+    const setCoup1 = this.mkSetters(['DC','AC','GND'], 'coup1');
+    const setCoup2 = this.mkSetters(['DC','AC','GND'], 'coup2');
+    const setSweep = this.mkSetters(['Auto','Normal','Single'], 'sweep');
+
+    // static segments (literal-style helpers)
+    const segOnLit = { flex:'1', height:'24px', display:'flex', alignItems:'center', justifyContent:'center', font:'600 11px Inter, sans-serif', cursor:'pointer', border:'none', background:'#2D313A', color:'#E6E9EF' };
+    const segOffLit = { flex:'1', height:'24px', display:'flex', alignItems:'center', justifyContent:'center', font:'600 11px Inter, sans-serif', cursor:'pointer', border:'none', background:'transparent', color:'#7A808C' };
+
+    // generator
+    const genWaves = ['Sine','Square','Ramp','Pulse','Noise','DC','Arb1','Arb2'];
+    const waveTile = {};
+    genWaves.forEach(wv => {
+      const on = wv === s.genWave;
+      waveTile[wv] = { height:'48px', display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', gap:'3px', cursor:'pointer',
+        border: on ? '1px solid #37D67A' : '1px solid #2A2D34', borderRadius:'6px',
+        background: on ? 'rgba(55,214,122,0.10)' : '#0E0F12',
+        color: on ? '#37D67A' : '#9AA0AC', fontSize:'17px' };
+    });
+    const setGenWave = this.mkSetters(genWaves, 'genWave');
+    const genToggleStyle = { display:'flex', alignItems:'center', height:'30px', padding:'0 12px', borderRadius:'6px', cursor:'pointer', font:'700 12px Inter, sans-serif',
+      border: s.genOn ? '1px solid #2F4A3C' : '1px solid #2A2D34',
+      background: s.genOn ? 'rgba(55,214,122,0.12)' : '#1B1E24',
+      color: s.genOn ? '#37D67A' : '#7A808C' };
+    const genTrackColor = s.genOn ? '#37D67A' : '#2A2D34';
+    const genKnobSide = s.genOn ? 'right' : 'left';
+    const genStateLabel = s.genOn ? 'ON' : 'OFF';
+
+    // zoom checkbox
+    const zoomChkStyle = { width:'14px', height:'14px', borderRadius:'3px', border:'1px solid #3A3F49', display:'flex', alignItems:'center', justifyContent:'center', fontSize:'9px', fontWeight:'700', color:'#08090B', background: s.zoomOn ? '#37D67A' : '#0E0F12' };
+    const zoomChk = s.zoomOn ? '✓' : '';
+
+    // trigger status from sweep + running
+    let trigStatus, trigStatusColor;
+    if (!s.running) { trigStatus = 'Stop'; trigStatusColor = '#E5484D'; }
+    else if (s.sweep === 'Auto') { trigStatus = "Auto"; trigStatusColor = '#F5A623'; }
+    else if (s.sweep === 'Single') { trigStatus = 'Ready'; trigStatusColor = '#23C8E6'; }
+    else { trigStatus = "Trig'd"; trigStatusColor = '#37D67A'; }
+    const trigBadgeStyle = { background:'rgba(8,9,11,0.82)', border:'1px solid '+this.rgba(trigStatusColor,0.5), borderRadius:'3px', padding:'3px 12px', font:"700 12px 'JetBrains Mono', monospace", color:trigStatusColor, letterSpacing:'.5px' };
+
+    const measures = [
+      { label:'Vpp',    src:'CH1', value:'3.60 V',    color:'#F2C300' },
+      { label:'Freq',   src:'CH1', value:'1.000 kHz', color:'#F2C300' },
+      { label:'Vrms',   src:'CH1', value:'1.273 V',   color:'#F2C300' },
+      { label:'Vmax',   src:'CH2', value:'+2.48 V',   color:'#23C8E6' },
+      { label:'Period', src:'CH2', value:'250.0 µs',  color:'#23C8E6' },
+      { label:'+Duty',  src:'CH2', value:'50.2 %',    color:'#23C8E6' }
+    ];
+
+    const scpiLog = [
+      { text:'> *IDN?',                              color:'#37D67A' },
+      { text:'< Hantek,DSO2D15,CN21034,V1.2.3',      color:'#C5C9D1' },
+      { text:'> :CHAN1:SCAL 0.5',                    color:'#37D67A' },
+      { text:'< OK',                                 color:'#6E747F' },
+      { text:'> :MEAS:VPP? CHAN1',                   color:'#37D67A' },
+      { text:'< 3.604E+0',                           color:'#C5C9D1' },
+      { text:'> :TRIG:EDGE:LEV 0.82',                color:'#37D67A' },
+      { text:'< OK',                                 color:'#6E747F' },
+      { text:'! :TRIG:LEV 99 — value out of range',  color:'#E5484D' }
+    ];
+
+    return {
+      setCanvas: this.setCanvas,
+      toggleRun: this.toggleRun, runBtnStyle, runLabel,
+      toggleScpi: this.toggleScpi, scpiBtnStyle, scpiOpen: s.scpiOpen,
+      toggleZoom: this.toggleZoom, zoomOn: s.zoomOn, zoomChkStyle, zoomChk,
+      tabStyle, tabs, tabScope: s.activeTab==='scope', tabGen: s.activeTab==='generator', tabSweep: s.activeTab==='sweep',
+      togglers, chev, exp,
+      coup1Seg, coup2Seg, sweepSeg, setCoup1, setCoup2, setSweep,
+      segOnLit, segOffLit,
+      waveTile, setGenWave, toggleGen: this.toggleGen, genToggleStyle, genTrackColor, genKnobSide, genStateLabel,
+      trigStatus, trigStatusColor, trigBadgeStyle,
+      measures, scpiLog
+    };
+  }
+}
+</script>
+</body>
+</html>

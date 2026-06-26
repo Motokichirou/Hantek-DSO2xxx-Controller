@@ -14,6 +14,9 @@ env/
 .coverage
 htmlcov/
 
+# Archives (design handoff is committed extracted under design/, not as zip)
+*.zip
+
 # IDE / OS
 .vscode/
 .idea/

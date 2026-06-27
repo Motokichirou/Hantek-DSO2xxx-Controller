@@ -36,57 +36,21 @@ from hantek_dso2d15.gui.panels.display import DisplayPanel
 from hantek_dso2d15.gui.panels.generator import GeneratorPanel
 from hantek_dso2d15.gui.panels.sweep import SweepPanel
 from hantek_dso2d15.gui.scpi_terminal import ScpiTerminal
-
-STYLE = """
-QMainWindow, QWidget { background: #0E0F12; color: #C5C9D1; }
-QToolBar { background: #16181D; border: none; spacing: 8px; padding: 6px; }
-QComboBox { background: #0E0F12; border: 1px solid #2A2D34; border-radius: 5px;
-            padding: 4px 8px; color: #E6E9EF; }
-QComboBox#resources { min-width: 320px; }
-QDoubleSpinBox { background: #0E0F12; border: 1px solid #2A2D34; border-radius: 4px;
-                 padding: 3px 18px 3px 6px; color: #E6E9EF; }
-QDoubleSpinBox::up-button { subcontrol-origin: border; subcontrol-position: top right;
-                 width: 16px; border-left: 1px solid #2A2D34; background: #1B1E24;
-                 border-top-right-radius: 4px; }
-QDoubleSpinBox::down-button { subcontrol-origin: border; subcontrol-position: bottom right;
-                 width: 16px; border-left: 1px solid #2A2D34; background: #1B1E24;
-                 border-bottom-right-radius: 4px; }
-QDoubleSpinBox::up-button:hover, QDoubleSpinBox::down-button:hover { background: #2A2D34; }
-QDoubleSpinBox::up-arrow { width: 0; height: 0; border-left: 4px solid transparent;
-                 border-right: 4px solid transparent; border-bottom: 5px solid #9AA0AC; }
-QDoubleSpinBox::down-arrow { width: 0; height: 0; border-left: 4px solid transparent;
-                 border-right: 4px solid transparent; border-top: 5px solid #9AA0AC; }
-QCheckBox { color: #9AA0AC; }
-QPushButton { background: #1B1E24; border: 1px solid #2A2D34; border-radius: 5px;
-              padding: 6px 14px; color: #C5C9D1; font-weight: 600; }
-QPushButton:hover { border-color: #3A3F49; }
-QPushButton#run { background: rgba(55,214,122,0.16); border-color: #2F4A3C; color: #37D67A; }
-QPushButton#stop { background: rgba(229,72,77,0.16); border-color: #5A2A2C; color: #E5484D; }
-QPushButton#single { color: #F5A623; border-color: #6A521E; }
-QPushButton#log:checked { background: rgba(229,72,77,0.20); border-color: #5A2A2C; color: #E5484D; }
-QPushButton#scpi:checked { background: rgba(55,214,122,0.16); border-color: #2F4A3C; color: #37D67A; }
-QPushButton:disabled { color: #5A606C; }
-QStatusBar { background: #16181D; color: #6E747F; }
-QLabel { color: #9AA0AC; }
-QDockWidget { color: #AEB4BF; }
-QTabWidget::pane { border: none; background: #13151A; }
-QTabBar::tab { background: #16181D; color: #7A808C; padding: 8px 14px; border: none; }
-QTabBar::tab:selected { color: #E6E9EF; border-bottom: 2px solid #37D67A; }
-QLabel#section { background: #1B1E24; color: #AEB4BF; font-weight: 600;
-                 padding: 5px 10px; letter-spacing: 0.7px; }
-"""
-
+from hantek_dso2d15.gui.accordion import CollapsibleSection
+from hantek_dso2d15.gui.theme import STYLESHEET
 
 class MainWindow(QMainWindow):
     # запросы пресета в поток воркера (Qt маршалит str/dict)
     _sigSavePreset = Signal(str)
     _sigApplyPreset = Signal(object)
+    #: универсальная отправка настройки в поток воркера (напр. drag уровня триггера)
+    _sigApplySetting = Signal(str, object)
 
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Hantek DSO2D15")
         self.resize(1280, 720)
-        self.setStyleSheet(STYLE)
+        self.setStyleSheet(STYLESHEET)
 
         # --- движок/соединение ---
         self._transport = None
@@ -206,16 +170,15 @@ class MainWindow(QMainWindow):
         sl = QVBoxLayout(scope_body)
         sl.setContentsMargins(0, 0, 0, 0)
         sl.setSpacing(0)
-        for title, panel in (("ВЕРТИКАЛЬ", self._vertical), ("ГОРИЗОНТАЛЬ", self._horizontal),
-                             ("ТРИГГЕР", self._trigger), ("ИЗМЕРЕНИЯ", self._measure),
-                             ("ACQUIRE", self._acquire), ("MATH / FFT", self._math),
-                             ("КУРСОРЫ", self._cursors), ("ДИСПЛЕЙ", self._display)):
-            hdr = QLabel(title)
-            hdr.setObjectName("section")
-            sl.addWidget(hdr)
+        # аккордеон: по умолчанию развёрнуты Вертикаль/Горизонталь/Триггер/Измерения
+        for title, panel, expanded in (
+                ("ВЕРТИКАЛЬ", self._vertical, True), ("ГОРИЗОНТАЛЬ", self._horizontal, True),
+                ("ТРИГГЕР", self._trigger, True), ("ИЗМЕРЕНИЯ", self._measure, True),
+                ("ACQUIRE", self._acquire, False), ("MATH / FFT", self._math, False),
+                ("КУРСОРЫ", self._cursors, False), ("ДИСПЛЕЙ", self._display, False)):
             if panel in self._panels or panel is self._measure:
                 panel.setEnabled(False)  # device-панели включаются при connect
-            sl.addWidget(panel)
+            sl.addWidget(CollapsibleSection(title, panel, expanded=expanded))
         sl.addStretch(1)
 
         # --- проводка клиентских панелей к графику (без прибора) ---
@@ -227,6 +190,8 @@ class MainWindow(QMainWindow):
         self._cursors.cursorModeChanged.connect(self._plot.cursors.set_mode)
         self._cursors.cursorSourceChanged.connect(self._plot.cursors.set_source)
         self._plot.cursors.valuesChanged.connect(self._cursors.update_readout)
+        # перетаскивание уровня триггера мышью на графике → прибор + панель
+        self._plot.triggerLevelChanged.connect(self._on_trigger_level_dragged)
 
         scope_scroll = QScrollArea()
         scope_scroll.setWidgetResizable(True)
@@ -366,6 +331,9 @@ class MainWindow(QMainWindow):
         self._worker.presetSaved.connect(self._on_preset_saved)
         self._worker.presetApplied.connect(self._on_preset_applied)
         self._worker.presetError.connect(self._on_sweep_error)
+        self._sigApplySetting.connect(
+            self._worker.apply_setting, Qt.ConnectionType.QueuedConnection
+        )
         # SCPI-терминал: команда → воркер; результат → журнал терминала
         self._terminal.commandEntered.connect(
             self._worker.send_command, Qt.ConnectionType.QueuedConnection
@@ -466,6 +434,12 @@ class MainWindow(QMainWindow):
     @Slot(str, str, bool)
     def _on_command_result(self, cmd, response, is_error):
         self._terminal.append_response(response, is_error)
+
+    @Slot(float)
+    def _on_trigger_level_dragged(self, volts):
+        """Уровень триггера перетащили на графике → в прибор + синхронизировать панель."""
+        self._sigApplySetting.emit("trigger.edge.level", float(volts))
+        self._trigger.update_level(float(volts))
 
     def _pick_sweep_folder(self):
         """Открыть диалог выбора папки для свипа (главный поток)."""
@@ -612,6 +586,11 @@ class MainWindow(QMainWindow):
         # переприменить стиль после смены objectName
         self._btn_run.setStyleSheet("")
         self.setStyleSheet(self.styleSheet())
+        # бейдж триггера: STOP красный / SINGLE «Ready» cyan; RUN ведут кадры (Trig'd/Auto)
+        if state is RunState.STOPPED:
+            self._plot.set_trigger_badge("Stop", "#E5484D")
+        elif state is RunState.SINGLE:
+            self._plot.set_trigger_badge("Ready", "#23C8E6")
 
     def closeEvent(self, event):
         self._disconnect()

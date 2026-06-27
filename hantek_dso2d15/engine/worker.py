@@ -209,6 +209,9 @@ class EngineWorker(QObject):
             # смена развёртки → обновить кэш timebase (кадры зумятся под s/дел)
             elif path == "timebase.scale":
                 self._controller.refresh_timebase()
+            # смена триггера → обновить кэш уровня/источника (маркеры триггера)
+            elif path.startswith("trigger."):
+                self._controller.refresh_trigger()
         except Exception as exc:  # noqa: BLE001
             self.errorOccurred.emit(f"apply_setting({path}={value!r}): {exc}")
 

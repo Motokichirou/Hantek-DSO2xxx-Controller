@@ -20,6 +20,7 @@ from PySide6.QtWidgets import (
 )
 
 from hantek_dso2d15.gui.widgets import DecimalSpinBox
+from hantek_dso2d15.gui.segmented import SegmentedControl
 
 # Каноничные SCPI-литералы режима развёртки (frozen, из docs/scpi-command-reference.md)
 MODES: tuple[str, ...] = ("MAIN", "XY", "ROLL")
@@ -75,12 +76,12 @@ class HorizontalPanel(QWidget):
         self._position.editingFinished.connect(self._on_position_finished)
         main_grid.addWidget(self._position, 1, 1)
 
-        # Режим
+        # Режим (segmented)
         main_grid.addWidget(QLabel("Режим"), 2, 0)
-        self._mode = QComboBox()
-        for m in MODES:
-            self._mode.addItem(m, m)
-        self._mode.currentIndexChanged.connect(self._on_mode_changed)
+        self._mode = SegmentedControl([("Main", "MAIN"), ("XY", "XY"), ("Roll", "ROLL")])
+        self._mode.valueChanged.connect(
+            lambda v: self.settingChanged.emit("timebase.mode", v)
+        )
         main_grid.addWidget(self._mode, 2, 1)
 
         outer.addLayout(main_grid)
@@ -137,11 +138,6 @@ class HorizontalPanel(QWidget):
     def _on_position_finished(self) -> None:
         self.settingChanged.emit("timebase.position", float(self._position.value()))
 
-    def _on_mode_changed(self, _index: int) -> None:
-        data = self._mode.currentData()
-        if data is not None:
-            self.settingChanged.emit("timebase.mode", str(data))
-
     def _on_win_enable_toggled(self, enabled: bool) -> None:
         self._win_scale.setEnabled(enabled)
         self._win_position.setEnabled(enabled)
@@ -169,9 +165,7 @@ class HorizontalPanel(QWidget):
         try:
             self._scale.setValue(float(tb.scale))
             self._position.setValue(float(tb.position))
-            idx = self._mode.findData(str(tb.mode))
-            if idx >= 0:
-                self._mode.setCurrentIndex(idx)
+            self._mode.set_value(str(tb.mode))
             win = tb.window
             enabled = bool(win.enable)
             self._win_enable.setChecked(enabled)

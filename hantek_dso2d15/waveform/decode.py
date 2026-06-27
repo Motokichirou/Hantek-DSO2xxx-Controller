@@ -58,6 +58,10 @@ class DecodedFrame:
     #: Развёртка прибора (с/дел), если известна. Заполняется контроллером из
     #: ``:TIMebase:SCALe?``. Используется графиком для зума окна 14×s/дел.
     timebase: float | None = None
+    #: Уровень триггера (вольты) и канал-источник (1/2) — для маркеров триггера.
+    #: Заполняются контроллером из ``:TRIGger:EDGE:LEVel?`` / ``:SOURce?``.
+    trigger_level: float | None = None
+    trigger_source: int | None = None
 
 
 def decode_frame(

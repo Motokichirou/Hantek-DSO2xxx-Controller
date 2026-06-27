@@ -93,7 +93,7 @@ class TestLoadFromScope:
     def test_load_sets_sweep(self, panel):
         scope = _FakeScope(sweep="NORMal")
         panel.load_from_scope(scope)
-        assert panel._sweep.currentText() == "NORMal"
+        assert panel._sweep.value() == "NORMal"
 
     def test_load_sets_source(self, panel):
         scope = _FakeScope(source="CHANnel2")
@@ -103,7 +103,7 @@ class TestLoadFromScope:
     def test_load_sets_slope(self, panel):
         scope = _FakeScope(slope="FALLing")
         panel.load_from_scope(scope)
-        assert panel._slope.currentText() == "FALLing"
+        assert panel._slope.value() == "FALLing"
 
     def test_load_sets_level(self, panel):
         scope = _FakeScope(level=1.5)
@@ -122,29 +122,22 @@ class TestLoadFromScope:
 
 class TestSweepSignal:
     def test_sweep_normal_emits(self, panel):
-        """Смена развёртки с AUTO → NORMal испускает settingChanged('trigger.sweep','NORMal')."""
-        # Убедимся, что стартуем с AUTO (первый элемент), не NORMal
-        panel._sweep.blockSignals(True)
-        panel._sweep.setCurrentText("AUTO")
-        panel._sweep.blockSignals(False)
-
+        """Клик по сегменту NORMal испускает settingChanged('trigger.sweep','NORMal')."""
+        panel._sweep.set_value("AUTO")  # стартуем с AUTO (без эмиссии)
         received = []
         panel.settingChanged.connect(lambda p, v: received.append((p, v)))
 
-        panel._sweep.setCurrentText("NORMal")
+        panel._sweep._button_map["NORMal"].click()  # клик пользователя по сегменту
 
         assert len(received) == 1, f"Ожидался 1 сигнал, получено: {received}"
         assert received[0] == ("trigger.sweep", "NORMal")
 
     def test_sweep_single_emits(self, panel):
-        panel._sweep.blockSignals(True)
-        panel._sweep.setCurrentText("AUTO")
-        panel._sweep.blockSignals(False)
-
+        panel._sweep.set_value("AUTO")
         received = []
         panel.settingChanged.connect(lambda p, v: received.append((p, v)))
 
-        panel._sweep.setCurrentText("SINGle")
+        panel._sweep._button_map["SINGle"].click()
 
         assert received == [("trigger.sweep", "SINGle")]
 
@@ -153,10 +146,8 @@ class TestSweepSignal:
         received = []
         panel.settingChanged.connect(lambda p, v: received.append((p, v)))
 
-        panel._sweep.blockSignals(True)
-        panel._sweep.setCurrentText("AUTO")
-        panel._sweep.blockSignals(False)
-        panel._sweep.setCurrentText("NORMal")
+        panel._sweep.set_value("AUTO")
+        panel._sweep._button_map["NORMal"].click()
 
         assert received and isinstance(received[0][1], str)
 
@@ -252,15 +243,12 @@ class TestCanonicalLiterals:
         assert received[0] == ("trigger.mode", "EDGE")
 
     def test_slope_rising_literal(self, panel):
-        """Выбор RISIng → settingChanged('trigger.edge.slope', 'RISIng') — точный литерал."""
-        panel._slope.blockSignals(True)
-        panel._slope.setCurrentText("FALLing")
-        panel._slope.blockSignals(False)
-
+        """Клик по RISIng → settingChanged('trigger.edge.slope', 'RISIng') — точный литерал."""
+        panel._slope.set_value("FALLing")
         received = []
         panel.settingChanged.connect(lambda p, v: received.append((p, v)))
 
-        panel._slope.setCurrentText("RISIng")
+        panel._slope._button_map["RISIng"].click()
 
         assert len(received) == 1
         assert received[0] == ("trigger.edge.slope", "RISIng")
@@ -292,9 +280,8 @@ class TestCanonicalLiterals:
         assert texts == {"CHANnel1", "CHANnel2", "EXT/10"}
 
     def test_slopes_present(self, panel):
-        """Все три фронта присутствуют в комбо."""
-        texts = {panel._slope.itemText(i) for i in range(panel._slope.count())}
-        assert texts == {"RISIng", "FALLing", "EITHer"}
+        """Все три фронта присутствуют в segmented-контроле."""
+        assert set(panel._slope._button_map.keys()) == {"RISIng", "FALLing", "EITHer"}
 
 
 # ---------------------------------------------------------------------------

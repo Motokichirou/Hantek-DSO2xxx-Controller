@@ -23,8 +23,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-# Цветокод каналов (совпадает с vertical.py и plot_widget)
-CH_COLORS: dict[int, str] = {1: "#F2C300", 2: "#3FE03F"}
+from hantek_dso2d15.gui.theme import CH_COLORS
 
 # Группы измерений со SCPI-элементами (frozen, из docs/scpi-command-reference.md)
 GROUPS: dict[str, list[str]] = {

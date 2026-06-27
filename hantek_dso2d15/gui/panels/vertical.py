@@ -13,9 +13,7 @@ from PySide6.QtWidgets import (
 )
 
 from hantek_dso2d15.gui.widgets import DecimalSpinBox
-
-# Цветокод каналов (как в plot_widget)
-CH_COLORS = {1: "#F2C300", 2: "#3FE03F"}
+from hantek_dso2d15.gui.theme import CH_COLORS, rgba
 
 # Стандартная последовательность V/дел (1-2-5), В
 VDIV_VALUES = [
@@ -41,8 +39,8 @@ class _ChannelCard(QFrame):
         color = CH_COLORS.get(n, "#C5C9D1")
         self.setObjectName(f"chcard{n}")
         self.setStyleSheet(
-            f"#chcard{n} {{ border: 1px solid {color}55; border-radius: 6px; "
-            f"background: {color}11; }}"
+            f"#chcard{n} {{ border: 1px solid {rgba(color, 0.35)}; border-radius: 6px; "
+            f"background: {rgba(color, 0.07)}; }}"
             f"QLabel {{ color: #9AA0AC; }}"
         )
         lay = QGridLayout(self)

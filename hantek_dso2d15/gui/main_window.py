@@ -6,6 +6,9 @@ frameReady и рисуются на графике. VISA-I/O не блокиру
 """
 from __future__ import annotations
 
+import os
+from datetime import datetime
+
 from PySide6.QtCore import Qt, QThread, QMetaObject, QElapsedTimer, Slot
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QToolBar, QComboBox, QPushButton, QLabel, QSizePolicy,
@@ -13,6 +16,7 @@ from PySide6.QtWidgets import (
 )
 
 from hantek_dso2d15.transport.visa_transport import VisaTransport
+from hantek_dso2d15.transport.scpi_log import ScpiLogger
 from hantek_dso2d15.scpi.scope import Scope
 from hantek_dso2d15.waveform.reader import WaveformReader
 from hantek_dso2d15.engine.controller import AcquisitionController
@@ -27,6 +31,7 @@ from hantek_dso2d15.gui.panels.measure import MeasurePanel
 from hantek_dso2d15.gui.panels.math import MathPanel
 from hantek_dso2d15.gui.panels.cursors import CursorsPanel
 from hantek_dso2d15.gui.panels.display import DisplayPanel
+from hantek_dso2d15.gui.panels.generator import GeneratorPanel
 
 STYLE = """
 QMainWindow, QWidget { background: #0E0F12; color: #C5C9D1; }
@@ -54,6 +59,7 @@ QPushButton:hover { border-color: #3A3F49; }
 QPushButton#run { background: rgba(55,214,122,0.16); border-color: #2F4A3C; color: #37D67A; }
 QPushButton#stop { background: rgba(229,72,77,0.16); border-color: #5A2A2C; color: #E5484D; }
 QPushButton#single { color: #F5A623; border-color: #6A521E; }
+QPushButton#log:checked { background: rgba(229,72,77,0.20); border-color: #5A2A2C; color: #E5484D; }
 QPushButton:disabled { color: #5A606C; }
 QStatusBar { background: #16181D; color: #6E747F; }
 QLabel { color: #9AA0AC; }
@@ -121,6 +127,15 @@ class MainWindow(QMainWindow):
         self._btn_single.setEnabled(False)
         tb.addWidget(self._btn_single)
 
+        # Логгер SCPI-обмена в файл (отдельная кнопка, кап 10 МБ с ротацией)
+        self._scpi_log = ScpiLogger()
+        self._btn_log = QPushButton("● LOG")
+        self._btn_log.setObjectName("log")
+        self._btn_log.setCheckable(True)
+        self._btn_log.setToolTip("Писать весь SCPI-обмен в файл (осциллограмма свёрнута; кап 10 МБ)")
+        self._btn_log.toggled.connect(self._toggle_log)
+        tb.addWidget(self._btn_log)
+
         # --- правый док: табы Scope / Generator / Sweep ---
         self._dock = QDockWidget("", self)
         self._dock.setFeatures(QDockWidget.NoDockWidgetFeatures)
@@ -140,9 +155,12 @@ class MainWindow(QMainWindow):
         self._math = MathPanel()
         self._cursors = CursorsPanel()
         self._display = DisplayPanel()
+        self._generator = GeneratorPanel()
         # settingChanged-панели (маршрутизируются в apply_setting воркера).
         # Measure имеет иной поток данных (см. проводку в _connect), потому отдельно.
-        self._panels = [self._vertical, self._horizontal, self._trigger, self._acquire]
+        # Generator — в своём табе, но тоже device-facing -> в _panels.
+        self._panels = [self._vertical, self._horizontal, self._trigger, self._acquire,
+                        self._generator]
         # Клиентские панели (Math/Cursors/Display) работают с НАШИМ графиком, а не с
         # прибором — проводка в __init__ (ниже), активны всегда.
         self._client_panels = [self._math, self._cursors, self._display]
@@ -179,7 +197,14 @@ class MainWindow(QMainWindow):
         scope_scroll.setWidget(scope_body)
 
         self._tabs.addTab(scope_scroll, "Scope")
-        self._tabs.addTab(QWidget(), "Generator")
+
+        gen_scroll = QScrollArea()
+        gen_scroll.setWidgetResizable(True)
+        gen_scroll.setFrameShape(QScrollArea.NoFrame)
+        self._generator.setEnabled(False)  # включится при connect
+        gen_scroll.setWidget(self._generator)
+        self._tabs.addTab(gen_scroll, "Generator")
+
         self._tabs.addTab(QWidget(), "Sweep")
         self._dock.setWidget(self._tabs)
         self.addDockWidget(Qt.RightDockWidgetArea, self._dock)
@@ -222,6 +247,8 @@ class MainWindow(QMainWindow):
             return
         try:
             self._transport = VisaTransport(resource, timeout_ms=8000)
+            if self._scpi_log.is_active:
+                self._transport.set_io_logger(self._scpi_log.callback)
             self._scope = Scope(self._transport)
             self._scope.connect()
             idn = self._scope.idn()
@@ -321,6 +348,21 @@ class MainWindow(QMainWindow):
         if self._worker is None:
             return
         QMetaObject.invokeMethod(self._worker, "single", Qt.ConnectionType.QueuedConnection)
+
+    def _toggle_log(self, on: bool):
+        """Включить/выключить файловый лог SCPI-обмена."""
+        if on:
+            ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+            path = os.path.abspath(f"scpi_{ts}.log")
+            self._scpi_log.start(path)
+            if self._transport is not None:
+                self._transport.set_io_logger(self._scpi_log.callback)
+            self._lbl_metrics.setText(f"⬤ SCPI-лог: {path}")
+        else:
+            if self._transport is not None:
+                self._transport.set_io_logger(None)
+            self._scpi_log.stop()
+            self._lbl_metrics.setText("SCPI-лог остановлен")
 
     # ------------------------------------------------------------------
     # Слоты сигналов worker (выполняются в UI-потоке)

@@ -42,6 +42,7 @@ class VisaTransport(Transport):
         read_termination: str | None = None,
         write_termination: str | None = "\n",
         resource_manager=None,
+        io_logger=None,
     ) -> None:
         self._resource_str = resource
         self._timeout_ms = timeout_ms
@@ -49,6 +50,9 @@ class VisaTransport(Transport):
         self._write_termination = write_termination
         self._rm = resource_manager  # может быть None; создаётся при open()
         self._res = None  # pyvisa-ресурс; None пока не открыт
+        # Опциональный хук логгера: callable(direction: str, payload) | None.
+        # Вызывается при каждом TX/RX; ошибки в хуке глушатся (не ломают I/O).
+        self._io_logger = io_logger
 
     # ------------------------------------------------------------------
     # Статический метод: список доступных ресурсов
@@ -103,6 +107,30 @@ class VisaTransport(Transport):
         return self._res is not None
 
     # ------------------------------------------------------------------
+    # Хук логгера
+    # ------------------------------------------------------------------
+
+    def set_io_logger(self, cb) -> None:
+        """Установить или снять хук логгера I/O.
+
+        Parameters
+        ----------
+        cb:
+            callable(direction: str, payload) или ``None`` для отключения.
+            Безопасно вызывать из любого потока (замена атомарна в CPython).
+        """
+        self._io_logger = cb
+
+    def _log(self, direction: str, payload) -> None:
+        """Вызвать хук логгера, поглощая все исключения из него."""
+        if self._io_logger is not None:
+            try:
+                self._io_logger(direction, payload)
+            except Exception:
+                # Ошибка логгера не должна прерывать I/O с прибором
+                pass
+
+    # ------------------------------------------------------------------
     # I/O — делегируют pyvisa-ресурсу
     # ------------------------------------------------------------------
 
@@ -116,17 +144,23 @@ class VisaTransport(Transport):
     def write(self, cmd: str) -> None:
         """Отправить команду SCPI прибору без ожидания ответа."""
         self._assert_open()
+        self._log("TX", cmd)
         self._res.write(cmd)
 
     def query(self, cmd: str) -> str:
         """Отправить запрос SCPI и вернуть ответ в виде строки."""
         self._assert_open()
-        return self._res.query(cmd)
+        self._log("TX", cmd)
+        resp = self._res.query(cmd)
+        self._log("RX", resp)
+        return resp
 
     def read_raw(self) -> bytes:
         """Прочитать сырые байты из буфера прибора."""
         self._assert_open()
-        return self._res.read_raw()
+        data = self._res.read_raw()
+        self._log("RX", data)
+        return data
 
     # ------------------------------------------------------------------
     # Переподключение

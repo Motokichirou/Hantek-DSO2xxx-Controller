@@ -1,0 +1,17 @@
+{
+  "channels": [
+    1,
+    2
+  ],
+  "scale": {
+    "1": 1.0,
+    "2": 5.0
+  },
+  "offset": {
+    "1": 0.0,
+    "2": 10.0
+  },
+  "n_pkts": 2,
+  "total": 8000,
+  "note": "CH1=DDS square 2Vpp; CH2 input~0 with offset+10V@5V/div (sample ~+50)"
+}

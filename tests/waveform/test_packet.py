@@ -82,49 +82,77 @@ class TestIsHeaderSynthetic:
 
 
 # ---------------------------------------------------------------------------
-# Real fixture tests
+# Real fixture tests — priv_sq_ch1.pkt0.bin (single-channel, 1 packet)
 # ---------------------------------------------------------------------------
 
 class TestParsePacketRealFixtures:
-    def test_pkt1_fields(self):
-        """frame_dc_p1v0_ch1.pkt1.bin: pkt_len=4029, total=4099, uploaded=99."""
-        raw = _fixture("frame_dc_p1v0_ch1.pkt1.bin")
+    def test_priv_sq_ch1_pkt0_pkt_len(self):
+        """priv_sq_ch1.pkt0.bin: pkt_len == 4128."""
+        raw = _fixture("priv_sq_ch1.pkt0.bin")
         pkt = parse_packet(raw)
-        assert pkt.pkt_len == 4029
-        assert pkt.total == 4099
-        assert pkt.uploaded == 99
+        assert pkt.pkt_len == 4128
 
-    def test_pkt1_payload_length(self):
-        """frame_dc_p1v0_ch1.pkt1.bin: payload has 4000 bytes."""
-        raw = _fixture("frame_dc_p1v0_ch1.pkt1.bin")
+    def test_priv_sq_ch1_pkt0_total(self):
+        """priv_sq_ch1.pkt0.bin: total == 4000 (1 channel × 4000 points)."""
+        raw = _fixture("priv_sq_ch1.pkt0.bin")
         pkt = parse_packet(raw)
-        assert len(pkt.payload) == 4000
+        assert pkt.total == 4000
 
-    def test_pkt0_has_valid_prefix(self):
-        """frame_dc_p1v0_ch1.pkt0.bin starts with #9."""
-        raw = _fixture("frame_dc_p1v0_ch1.pkt0.bin")
-        # should not raise
+    def test_priv_sq_ch1_pkt0_uploaded(self):
+        """priv_sq_ch1.pkt0.bin: uploaded == 0 (first packet)."""
+        raw = _fixture("priv_sq_ch1.pkt0.bin")
         pkt = parse_packet(raw)
-        assert pkt is not None
+        assert pkt.uploaded == 0
+
+    def test_priv_sq_ch1_pkt0_payload_length(self):
+        """priv_sq_ch1.pkt0.bin: payload length equals len(raw) - 29."""
+        raw = _fixture("priv_sq_ch1.pkt0.bin")
+        pkt = parse_packet(raw)
+        assert len(pkt.payload) == len(raw) - 29
+
+    def test_priv_sq_ch1_pkt0_payload_is_raw_29_slice(self):
+        """priv_sq_ch1.pkt0.bin: payload is exactly raw[29:]."""
+        raw = _fixture("priv_sq_ch1.pkt0.bin")
+        pkt = parse_packet(raw)
+        assert pkt.payload == raw[29:]
+
+    # Two-channel fixture — pkt0 (first transfer, uploaded=0)
+    def test_priv_sq_ch1_off_ch2_pkt0_fields(self):
+        """priv_sq_ch1_off_ch2.pkt0.bin: pkt_len==4128, total==8000, uploaded==0."""
+        raw = _fixture("priv_sq_ch1_off_ch2.pkt0.bin")
+        pkt = parse_packet(raw)
+        assert pkt.pkt_len == 4128
+        assert pkt.total == 8000
+        assert pkt.uploaded == 0
+
+    # Two-channel fixture — pkt1 (second transfer, uploaded=4000)
+    def test_priv_sq_ch1_off_ch2_pkt1_fields(self):
+        """priv_sq_ch1_off_ch2.pkt1.bin: pkt_len==4128, total==8000, uploaded==4000."""
+        raw = _fixture("priv_sq_ch1_off_ch2.pkt1.bin")
+        pkt = parse_packet(raw)
+        assert pkt.pkt_len == 4128
+        assert pkt.total == 8000
+        assert pkt.uploaded == 4000
 
 
 class TestIsHeaderRealFixtures:
-    def test_pkt0_is_header(self):
-        """frame_dc_p1v0_ch1.pkt0.bin (128 bytes) → is_header True."""
-        raw = _fixture("frame_dc_p1v0_ch1.pkt0.bin")
-        assert is_header(raw) is True
-
-    def test_pkt1_is_not_header(self):
-        """frame_dc_p1v0_ch1.pkt1.bin (4029 bytes) → is_header False."""
-        raw = _fixture("frame_dc_p1v0_ch1.pkt1.bin")
+    def test_priv_sq_ch1_pkt0_is_not_header(self):
+        """priv_sq_ch1.pkt0.bin (len=4128) → is_header is False."""
+        raw = _fixture("priv_sq_ch1.pkt0.bin")
         assert is_header(raw) is False
 
-    def test_ch1ch2_pkt0_is_header(self):
-        """frame_dc_p1v0_ch1ch2.pkt0.bin → is_header True."""
-        raw = _fixture("frame_dc_p1v0_ch1ch2.pkt0.bin")
-        assert is_header(raw) is True
-
-    def test_ch1ch2_pkt1_is_not_header(self):
-        """frame_dc_p1v0_ch1ch2.pkt1.bin → is_header False."""
-        raw = _fixture("frame_dc_p1v0_ch1ch2.pkt1.bin")
+    def test_priv_sq_ch1_off_ch2_pkt0_is_not_header(self):
+        """priv_sq_ch1_off_ch2.pkt0.bin (len=4128) → is_header is False."""
+        raw = _fixture("priv_sq_ch1_off_ch2.pkt0.bin")
         assert is_header(raw) is False
+
+    def test_priv_sq_ch1_off_ch2_pkt1_is_not_header(self):
+        """priv_sq_ch1_off_ch2.pkt1.bin (len=4128) → is_header is False."""
+        raw = _fixture("priv_sq_ch1_off_ch2.pkt1.bin")
+        assert is_header(raw) is False
+
+    def test_synthetic_128_byte_header_true(self):
+        """Synthetic 128-byte '#9…' packet → is_header is True."""
+        raw = b"#9" + b"000000128" + b"000000000" + b"000000000" + b"\x00" * 99
+        assert len(raw) == 128
+        assert is_header(raw) is True

@@ -1,4 +1,14 @@
-"""Tests for hantek_dso2d15.waveform.reader — Task W4 acceptance.
+"""Tests for hantek_dso2d15.waveform.reader.
+
+Uses real hardware-captured fixtures from tests/fixtures/waveform/:
+  priv_sq_ch1.pkt0.bin          -- 1-channel square-wave capture (CH1 only)
+  priv_sq_ch1_off_ch2.pkt0.bin  -- 2-channel capture, packet 0 (uploaded=0)
+  priv_sq_ch1_off_ch2.pkt1.bin  -- 2-channel capture, packet 1 (uploaded=4000)
+
+Fixture facts (hardware-verified 2026-06-27):
+  1-ch: total=4000, 1 packet sufficient, enable='1000', srate=1.25e6
+  2-ch: total=8000, 2 packets, enable='1100'; de-interleaved:
+        CH1 (pp=53, square wave), CH2 (pp=2, flat ~+50 count)
 
 Run: .venv/Scripts/python.exe -m pytest tests/waveform/test_reader.py -q
 """
@@ -6,11 +16,17 @@ Run: .venv/Scripts/python.exe -m pytest tests/waveform/test_reader.py -q
 from __future__ import annotations
 
 import pathlib
+
+import numpy as np
 import pytest
 
 from hantek_dso2d15.transport.fake_transport import FakeTransport
+from hantek_dso2d15.waveform.reader import RawFrame, WaveformReader
 
 FIXTURES = pathlib.Path(__file__).parent.parent / "fixtures" / "waveform"
+
+# SCPI command as implemented in reader._QUERY (PRIVate prefix is mandatory).
+SCPI_CMD = "PRIVate:WAVeform:DATA:ALL?"
 
 
 def _fixture(name: str) -> bytes:
@@ -18,242 +34,214 @@ def _fixture(name: str) -> bytes:
 
 
 # ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-def _make_reader(transport: FakeTransport):
-    from hantek_dso2d15.waveform.reader import WaveformReader
-    return WaveformReader(transport)
-
-
-def _load_1ch_frame():
-    """Return (pkt0_bytes, pkt1_bytes) for the 1-channel DC frame."""
-    return (
-        _fixture("frame_dc_p1v0_ch1.pkt0.bin"),
-        _fixture("frame_dc_p1v0_ch1.pkt1.bin"),
-    )
-
-
-def _load_2ch_frame():
-    """Return (pkt0, pkt1, pkt2) for the 2-channel DC frame."""
-    return (
-        _fixture("frame_dc_p1v0_ch1ch2.pkt0.bin"),
-        _fixture("frame_dc_p1v0_ch1ch2.pkt1.bin"),
-        _fixture("frame_dc_p1v0_ch1ch2.pkt2.bin"),
-    )
-
-
-# ---------------------------------------------------------------------------
-# Imports check
+# Import sanity
 # ---------------------------------------------------------------------------
 
 class TestImports:
-    def test_rawframe_importable(self):
-        from hantek_dso2d15.waveform.reader import RawFrame
-        assert RawFrame is not None
-
     def test_waveformreader_importable(self):
-        from hantek_dso2d15.waveform.reader import WaveformReader
         assert WaveformReader is not None
 
+    def test_rawframe_importable(self):
+        assert RawFrame is not None
 
-# ---------------------------------------------------------------------------
-# RawFrame dataclass
-# ---------------------------------------------------------------------------
-
-class TestRawFrameDataclass:
-    def test_rawframe_fields(self):
-        """RawFrame holds header and data_payloads."""
-        from hantek_dso2d15.waveform.reader import RawFrame
-        from hantek_dso2d15.waveform.header import parse_header
-
-        pkt0, _ = _load_1ch_frame()
-        hdr = parse_header(pkt0)
-        frame = RawFrame(header=hdr, data_payloads=[b"\x01\x02\x03"])
+    def test_rawframe_has_header_and_payloads(self):
+        """RawFrame dataclass has header and data_payloads fields."""
+        from hantek_dso2d15.waveform.header import WaveHeader
+        hdr = WaveHeader(running=False, triggered=False,
+                         enabled_channels=[1], srate=1.25e6)
+        frame = RawFrame(header=hdr, data_payloads=[b"\x01\x02"])
         assert frame.header is hdr
-        assert frame.data_payloads == [b"\x01\x02\x03"]
+        assert frame.data_payloads == [b"\x01\x02"]
 
     def test_rawframe_default_empty_payloads(self):
-        """RawFrame.data_payloads defaults to empty list."""
-        from hantek_dso2d15.waveform.reader import RawFrame
-        from hantek_dso2d15.waveform.header import parse_header
-
-        pkt0, _ = _load_1ch_frame()
-        hdr = parse_header(pkt0)
-        frame = RawFrame(header=hdr, data_payloads=[])
+        from hantek_dso2d15.waveform.header import WaveHeader
+        hdr = WaveHeader(running=False, triggered=False,
+                         enabled_channels=[1], srate=1.25e6)
+        frame = RawFrame(header=hdr)
         assert frame.data_payloads == []
 
 
 # ---------------------------------------------------------------------------
-# 1-channel frame
+# 1-channel frame (priv_sq_ch1.pkt0.bin)
 # ---------------------------------------------------------------------------
 
 class TestReadFrame1Channel:
-    def setup_method(self):
-        pkt0, pkt1 = _load_1ch_frame()
-        self.transport = FakeTransport()
-        self.transport.set_raw(pkt0, pkt1)
-        self.transport.open()
-        self.reader = _make_reader(self.transport)
+    """Single-channel square-wave capture: 1 packet totals all 4000 sample bytes."""
 
-    def test_read_frame_returns_rawframe(self):
-        from hantek_dso2d15.waveform.reader import RawFrame
+    def setup_method(self):
+        pkt0 = _fixture("priv_sq_ch1.pkt0.bin")
+        self.transport = FakeTransport()
+        # One packet is sufficient: total=4000, packet carries 4000 sample bytes.
+        self.transport.set_raw(pkt0)
+        self.transport.open()
+        self.reader = WaveformReader(self.transport)
+
+    def test_returns_rawframe(self):
         frame = self.reader.read_frame()
         assert isinstance(frame, RawFrame)
 
-    def test_1ch_enabled_channels(self):
-        """1-channel frame: header.enabled_channels == [1]."""
+    def test_enabled_channels(self):
+        """enable='1000' -> enabled_channels == [1]."""
         frame = self.reader.read_frame()
         assert frame.header.enabled_channels == [1]
 
-    def test_1ch_data_payloads_count(self):
-        """1-channel frame: exactly one data payload."""
+    def test_payload_count(self):
+        """Exactly one payload (one enabled channel)."""
         frame = self.reader.read_frame()
         assert len(frame.data_payloads) == 1
 
-    def test_1ch_payload_length(self):
-        """1-channel frame: payload has 4000 bytes."""
+    def test_payload_length(self):
+        """Payload length == 4000 (ACQuire:POINts 4000)."""
         frame = self.reader.read_frame()
         assert len(frame.data_payloads[0]) == 4000
 
-    def test_1ch_srate(self):
-        """1-channel frame: srate == 1.25e6."""
+    def test_srate(self):
+        """srate field parsed from ASCII '1.250e+06' -> 1 250 000.0 Sa/s."""
         frame = self.reader.read_frame()
         assert frame.header.srate == 1_250_000.0
 
-    def test_1ch_triggered_false(self):
-        """1-channel frame: triggered is False (DDS DC signal, auto-trigger mode)."""
+    def test_running_false(self):
+        """running bit '0' -> running is False."""
+        frame = self.reader.read_frame()
+        assert frame.header.running is False
+
+    def test_triggered_false(self):
+        """trig bit '0' -> triggered is False."""
         frame = self.reader.read_frame()
         assert frame.header.triggered is False
 
+    def test_scpi_command_in_writes(self):
+        """Reader writes PRIVate:WAVeform:DATA:ALL? (with PRIVate prefix)."""
+        self.reader.read_frame()
+        assert SCPI_CMD in self.transport.writes
+
+    def test_square_wave_stats(self):
+        """CH1 is a 2Vpp square wave: peak-to-peak count > 40 (pp=53 in fixture)."""
+        frame = self.reader.read_frame()
+        arr = np.frombuffer(frame.data_payloads[0], dtype=np.int8)
+        assert int(arr.max()) - int(arr.min()) > 40
+
 
 # ---------------------------------------------------------------------------
-# 2-channel frame
+# 2-channel frame (priv_sq_ch1_off_ch2.pkt0.bin + .pkt1.bin)
 # ---------------------------------------------------------------------------
 
 class TestReadFrame2Channel:
-    def setup_method(self):
-        pkt0, pkt1, pkt2 = _load_2ch_frame()
-        self.transport = FakeTransport()
-        self.transport.set_raw(pkt0, pkt1, pkt2)
-        self.transport.open()
-        self.reader = _make_reader(self.transport)
+    """Two-channel capture: 2 packets needed (total=8000 = 2*4000)."""
 
-    def test_2ch_enabled_channels(self):
-        """2-channel frame: header.enabled_channels == [1, 2]."""
+    def setup_method(self):
+        pkt0 = _fixture("priv_sq_ch1_off_ch2.pkt0.bin")
+        pkt1 = _fixture("priv_sq_ch1_off_ch2.pkt1.bin")
+        self.transport = FakeTransport()
+        self.transport.set_raw(pkt0, pkt1)
+        self.transport.open()
+        self.reader = WaveformReader(self.transport)
+
+    def test_enabled_channels(self):
+        """enable='1100' -> enabled_channels == [1, 2]."""
         frame = self.reader.read_frame()
         assert frame.header.enabled_channels == [1, 2]
 
-    def test_2ch_data_payloads_count(self):
-        """2-channel frame: exactly two data payloads."""
+    def test_payload_count(self):
+        """Two payloads, one per enabled channel."""
         frame = self.reader.read_frame()
         assert len(frame.data_payloads) == 2
 
-    def test_2ch_payload_lengths(self):
-        """2-channel frame: both payloads have 4000 bytes."""
+    def test_payload_length_ch1(self):
+        """CH1 payload == 4000 bytes after de-interleave."""
         frame = self.reader.read_frame()
         assert len(frame.data_payloads[0]) == 4000
+
+    def test_payload_length_ch2(self):
+        """CH2 payload == 4000 bytes after de-interleave."""
+        frame = self.reader.read_frame()
         assert len(frame.data_payloads[1]) == 4000
 
-    def test_2ch_srate(self):
-        """2-channel frame: srate == 1.25e6."""
+    def test_payloads_differ(self):
+        """De-interleave must produce distinct bytes for CH1 (square) vs CH2 (flat)."""
+        frame = self.reader.read_frame()
+        assert frame.data_payloads[0] != frame.data_payloads[1]
+
+    def test_ch1_is_square_wave(self):
+        """CH1 de-interleaved: DDS 2Vpp square -> peak-to-peak count > 40 (pp=53)."""
+        frame = self.reader.read_frame()
+        arr = np.frombuffer(frame.data_payloads[0], dtype=np.int8)
+        assert int(arr.max()) - int(arr.min()) > 40
+
+    def test_ch2_is_flat(self):
+        """CH2 de-interleaved: offset +10V@5V/div -> flat ~+50 count, pp < 10 (pp=2)."""
+        frame = self.reader.read_frame()
+        arr = np.frombuffer(frame.data_payloads[1], dtype=np.int8)
+        assert int(arr.max()) - int(arr.min()) < 10
+
+    def test_scpi_command_in_writes(self):
+        """PRIVate:WAVeform:DATA:ALL? must appear in writes for 2-ch capture."""
+        frame = self.reader.read_frame()
+        assert SCPI_CMD in self.transport.writes
+
+    def test_two_writes_for_two_packets(self):
+        """2 packets collected -> 2 writes of the SCPI command."""
+        self.reader.read_frame()
+        count = self.transport.writes.count(SCPI_CMD)
+        assert count == 2
+
+    def test_srate(self):
+        """srate == 1.25 MSa/s in 2-channel mode."""
         frame = self.reader.read_frame()
         assert frame.header.srate == 1_250_000.0
 
 
 # ---------------------------------------------------------------------------
-# SCPI command logged in writes
+# SCPI command correctness (PRIVate prefix must be present)
 # ---------------------------------------------------------------------------
 
-class TestScpiCommandLogged:
-    def test_query_string_in_writes_1ch(self):
-        """:WAVeform:DATA:ALL? written to transport.writes for each packet."""
-        pkt0, pkt1 = _load_1ch_frame()
-        transport = FakeTransport()
-        transport.set_raw(pkt0, pkt1)
-        transport.open()
-        reader = _make_reader(transport)
-        reader.read_frame()
-        assert ":WAVeform:DATA:ALL?" in transport.writes
+class TestScpiCommand:
+    """Verify the exact SCPI string sent to transport."""
 
-    def test_query_written_twice_for_1ch(self):
-        """1-channel frame needs 2 packets → 2 writes."""
-        pkt0, pkt1 = _load_1ch_frame()
-        transport = FakeTransport()
-        transport.set_raw(pkt0, pkt1)
-        transport.open()
-        reader = _make_reader(transport)
-        reader.read_frame()
-        scpi_writes = [w for w in transport.writes if w == ":WAVeform:DATA:ALL?"]
-        assert len(scpi_writes) == 2
+    def test_priv_prefix_present(self):
+        """Reader must use 'PRIVate:WAVeform:DATA:ALL?' not ':WAVeform:DATA:ALL?'."""
+        pkt0 = _fixture("priv_sq_ch1.pkt0.bin")
+        t = FakeTransport()
+        t.set_raw(pkt0)
+        t.open()
+        WaveformReader(t).read_frame()
+        assert any(w.startswith("PRIVate:") for w in t.writes), (
+            f"Expected write starting with 'PRIVate:', got {t.writes!r}"
+        )
 
-    def test_query_written_three_times_for_2ch(self):
-        """2-channel frame needs 3 packets → 3 writes."""
-        pkt0, pkt1, pkt2 = _load_2ch_frame()
-        transport = FakeTransport()
-        transport.set_raw(pkt0, pkt1, pkt2)
-        transport.open()
-        reader = _make_reader(transport)
-        reader.read_frame()
-        scpi_writes = [w for w in transport.writes if w == ":WAVeform:DATA:ALL?"]
-        assert len(scpi_writes) == 3
+    def test_exact_scpi_string(self):
+        """Exact command string is 'PRIVate:WAVeform:DATA:ALL?'."""
+        pkt0 = _fixture("priv_sq_ch1.pkt0.bin")
+        t = FakeTransport()
+        t.set_raw(pkt0)
+        t.open()
+        WaveformReader(t).read_frame()
+        assert SCPI_CMD in t.writes, (
+            f"Expected '{SCPI_CMD}' in writes, got {t.writes!r}"
+        )
 
 
 # ---------------------------------------------------------------------------
-# Sync: reader skips data packet before first header
-# ---------------------------------------------------------------------------
-
-class TestSyncronisation:
-    def test_skip_data_packet_before_header(self):
-        """Reader discards stray DATA packet and finds the following HEADER."""
-        pkt0, pkt1 = _load_1ch_frame()
-        transport = FakeTransport()
-        # Queue: [DATA (stray), HEADER, DATA]
-        transport.set_raw(pkt1, pkt0, pkt1)
-        transport.open()
-        reader = _make_reader(transport)
-        frame = reader.read_frame()
-        # Should have found the header and read one data payload
-        assert frame.header.enabled_channels == [1]
-        assert len(frame.data_payloads) == 1
-        assert len(frame.data_payloads[0]) == 4000
-
-    def test_writes_still_recorded_during_sync(self):
-        """Writes are logged for each packet read including skipped ones."""
-        pkt0, pkt1 = _load_1ch_frame()
-        transport = FakeTransport()
-        transport.set_raw(pkt1, pkt0, pkt1)
-        transport.open()
-        reader = _make_reader(transport)
-        reader.read_frame()
-        # 3 packets read → 3 writes
-        assert transport.writes.count(":WAVeform:DATA:ALL?") == 3
-
-
-# ---------------------------------------------------------------------------
-# max_packets guard
+# max_packets guard (synthetic: malformed packet causes early termination)
 # ---------------------------------------------------------------------------
 
 class TestMaxPacketsGuard:
-    def _make_infinite_data_queue(self, transport: FakeTransport, n: int = 100):
-        """Fill transport with n copies of a DATA packet (no header ever)."""
-        _, pkt1 = _load_1ch_frame()
-        transport.set_raw(*([pkt1] * n))
+    """Reader raises RuntimeError when max_packets exceeded without full frame."""
 
-    def test_runtime_error_when_no_header_found(self):
-        """RuntimeError raised when max_packets exceeded without finding header."""
-        transport = FakeTransport()
-        self._make_infinite_data_queue(transport, n=10)
-        transport.open()
-        reader = _make_reader(transport)
-        with pytest.raises(RuntimeError, match="max_packets|header"):
-            reader.read_frame(max_packets=5)
+    def _bad_packet(self) -> bytes:
+        """Return a syntactically valid packet whose pkt_len is 0 (skipped by reader)."""
+        hdr = bytearray(128)
+        hdr[0:2] = b"#9"
+        hdr[2:11] = b"000000000"   # pkt_len = 0 -> reader skips
+        hdr[11:20] = b"000004000"
+        hdr[20:29] = b"000000000"
+        return bytes(hdr)
 
-    def test_runtime_error_uses_custom_max(self):
-        """max_packets=3 stops early enough to detect no header."""
-        transport = FakeTransport()
-        self._make_infinite_data_queue(transport, n=10)
-        transport.open()
-        reader = _make_reader(transport)
+    def test_raises_runtime_error(self):
+        """RuntimeError raised when all packets have pkt_len=0 and frame never completes."""
+        bad = self._bad_packet()
+        t = FakeTransport()
+        t.set_raw(*([bad] * 20))
+        t.open()
         with pytest.raises(RuntimeError):
-            reader.read_frame(max_packets=3)
+            WaveformReader(t).read_frame(max_packets=5)

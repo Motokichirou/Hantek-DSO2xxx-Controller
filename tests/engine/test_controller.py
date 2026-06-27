@@ -1,7 +1,12 @@
-"""Tests for hantek_dso2d15.engine.controller — Task E2.
+"""Tests for hantek_dso2d15.engine.controller.
 
-TDD: tests written before implementation. Tests use real fixture packets
-(hardware-verified 2026-06-27) through FakeTransport — no real instrument needed.
+TDD: rewritten to use hardware-verified PRIVate fixtures (2026-06-27).
+All tests run through FakeTransport — no real instrument needed.
+
+Fixtures used:
+  priv_sq_ch1.pkt0.bin           — 1 channel, CH1 square 2Vpp @ 1V/div, off=0
+  priv_sq_ch1_off_ch2.pkt0.bin   — 2 channels, packet 0 (uploaded=0)
+  priv_sq_ch1_off_ch2.pkt1.bin   — 2 channels, packet 1 (uploaded=4000)
 """
 from __future__ import annotations
 
@@ -28,14 +33,11 @@ def _load(*names: str) -> list[bytes]:
 # ---------------------------------------------------------------------------
 
 def _make_controller_ch1():
-    """Single-channel controller: CH1 DC +1.0V fixture."""
-    pkt0, pkt1 = _load(
-        "frame_dc_p1v0_ch1.pkt0.bin",
-        "frame_dc_p1v0_ch1.pkt1.bin",
-    )
+    """1-channel controller: CH1 square wave 2Vpp, 1V/div, offset=0."""
+    (pkt0,) = _load("priv_sq_ch1.pkt0.bin")
     transport = FakeTransport()
-    # Queue packets twice to be safe (reader may consume header + data)
-    transport.set_raw(pkt0, pkt1, pkt0, pkt1)
+    # Two copies: enough for tests that call read_decoded_frame() twice.
+    transport.set_raw(pkt0, pkt0)
     transport.set_response(":CHANnel1:SCALe?", "1.000000e+00")
     transport.set_response(":CHANnel1:OFFSet?", "0.000000e+00")
     transport.open()
@@ -46,18 +48,23 @@ def _make_controller_ch1():
 
 
 def _make_controller_ch1ch2():
-    """Two-channel controller: CH1+CH2 DC +1.0V fixture."""
-    pkt0, pkt1, pkt2 = _load(
-        "frame_dc_p1v0_ch1ch2.pkt0.bin",
-        "frame_dc_p1v0_ch1ch2.pkt1.bin",
-        "frame_dc_p1v0_ch1ch2.pkt2.bin",
+    """2-channel controller using priv_sq_ch1_off_ch2 fixture.
+
+    CH1: square 2Vpp @ 1V/div, off=0  → Vpp ≈ 2.0V.
+    CH2: flat ≈+50 count @ 5V/div, off=+10V → decoded ≈ 0V.
+    Each frame needs two packets (pkt0 + pkt1); queue holds two frames.
+    """
+    pkt0, pkt1 = _load(
+        "priv_sq_ch1_off_ch2.pkt0.bin",
+        "priv_sq_ch1_off_ch2.pkt1.bin",
     )
     transport = FakeTransport()
-    transport.set_raw(pkt0, pkt1, pkt2, pkt0, pkt1, pkt2)
+    # Two full frames: pkt0+pkt1 twice.
+    transport.set_raw(pkt0, pkt1, pkt0, pkt1)
     transport.set_response(":CHANnel1:SCALe?", "1.000000e+00")
     transport.set_response(":CHANnel1:OFFSet?", "0.000000e+00")
-    transport.set_response(":CHANnel2:SCALe?", "1.000000e+00")
-    transport.set_response(":CHANnel2:OFFSet?", "0.000000e+00")
+    transport.set_response(":CHANnel2:SCALe?", "5.000000e+00")
+    transport.set_response(":CHANnel2:OFFSet?", "1.000000e+01")
     transport.open()
     scope = Scope(transport)
     reader = WaveformReader(transport)
@@ -77,17 +84,21 @@ class TestReadDecodedFrameSingleChannel:
         assert isinstance(result, DecodedFrame)
 
     def test_channels_set_is_ch1_only(self):
-        """enabled_channels for single-CH fixture must be {1}."""
+        """enable='1000' → only CH1 present; channels keys must be {1}."""
         controller, _ = _make_controller_ch1()
         result = controller.read_decoded_frame()
         assert set(result.channels.keys()) == {1}
 
-    def test_ch1_mean_approx_1v(self):
-        """DDS DC +1.0V → CH1 mean must be within ±0.1V of 1.0V."""
+    def test_ch1_vpp_approx_2v(self):
+        """Square wave ±25 count @ 1V/div → Vpp ≈ 2.0V (within ±0.15V).
+
+        Hardware fixture has min=-26, max=27 (53 counts = 2.12V with noise).
+        """
         controller, _ = _make_controller_ch1()
         result = controller.read_decoded_frame()
-        mean_v = float(np.mean(result.channels[1]))
-        assert abs(mean_v - 1.0) < 0.1, f"mean={mean_v:.4f}, expected ≈1.0V"
+        ch1 = result.channels[1]
+        vpp = float(np.max(ch1) - np.min(ch1))
+        assert abs(vpp - 2.0) < 0.15, f"CH1 Vpp={vpp:.4f}V, expected ≈2.0V (±0.15V)"
 
 
 # ---------------------------------------------------------------------------
@@ -100,22 +111,35 @@ class TestReadDecodedFrameTwoChannels:
         result = controller.read_decoded_frame()
         assert isinstance(result, DecodedFrame)
 
-    def test_duplicate_payloads_collapse_to_ch1(self):
-        """Квирк прошивки: DATA:ALL? отдаёт CH1, продублированный по каналам.
+    def test_channels_set_is_ch1_and_ch2(self):
+        """enable='1100' → both channels present; channels keys must be {1, 2}.
 
-        В 2-канальной фикстуре оба data-пакета БАЙТ-ИДЕНТИЧНЫ (подтверждено на
-        железе). Контроллер дедуплицирует → реальный канал только CH1
-        (форвард-совместимо: различные пакеты дали бы оба канала).
+        The old dedup quirk (collapsing identical payloads to CH1 only) has been
+        removed; distinct hardware channels must yield distinct keys.
         """
         controller, _ = _make_controller_ch1ch2()
         result = controller.read_decoded_frame()
-        assert set(result.channels.keys()) == {1}
+        assert set(result.channels.keys()) == {1, 2}
 
-    def test_ch1_mean_approx_1v(self):
+    def test_ch1_vpp_approx_2v(self):
+        """CH1 de-interleaved square wave must decode to Vpp ≈ 2.0V (within ±0.15V)."""
         controller, _ = _make_controller_ch1ch2()
         result = controller.read_decoded_frame()
-        mean_v = float(np.mean(result.channels[1]))
-        assert abs(mean_v - 1.0) < 0.1, f"CH1 mean={mean_v:.4f}, expected ≈1.0V"
+        ch1 = result.channels[1]
+        vpp = float(np.max(ch1) - np.min(ch1))
+        assert abs(vpp - 2.0) < 0.15, f"CH1 Vpp={vpp:.4f}V, expected ≈2.0V (±0.15V)"
+
+    def test_ch2_mean_approx_0v(self):
+        """CH2 de-interleaved flat ≈+50 count @ 5V/div, off=+10V → mean ≈ 0V.
+
+        Calibration: 50/25 * 5.0 − 10.0 = 10.0 − 10.0 = 0.0V.
+        Verifies de-interleave correctness: CH1≠CH2 (square vs flat).
+        """
+        controller, _ = _make_controller_ch1ch2()
+        result = controller.read_decoded_frame()
+        ch2 = result.channels[2]
+        mean_v = float(np.mean(ch2))
+        assert abs(mean_v - 0.0) < 0.2, f"CH2 mean={mean_v:.4f}V, expected ≈0V (±0.2V)"
 
 
 # ---------------------------------------------------------------------------
@@ -126,7 +150,7 @@ class TestForce:
     def test_force_sends_trigger_force(self):
         """`force()` must write ':TRIGger:FORCe' to the transport."""
         controller, transport = _make_controller_ch1()
-        transport.reset()  # clear any prior writes
+        transport.reset()
         controller.force()
         assert ":TRIGger:FORCe" in transport.writes
 
@@ -166,7 +190,7 @@ class TestSetSweep:
 
     def test_set_sweep_invalid_raises(self):
         """Invalid sweep mode must raise ValueError (from Trigger.sweep setter)."""
-        controller, transport = _make_controller_ch1()
+        controller, _ = _make_controller_ch1()
         with pytest.raises(ValueError):
             controller.set_sweep("BOGUS")
 
@@ -177,13 +201,10 @@ class TestSetSweep:
 
 class TestCustomDecoder:
     def test_custom_decoder_is_called(self):
-        """AcquisitionController must accept an injected decoder callable."""
-        pkt0, pkt1 = _load(
-            "frame_dc_p1v0_ch1.pkt0.bin",
-            "frame_dc_p1v0_ch1.pkt1.bin",
-        )
+        """AcquisitionController must forward (frame, scales, offsets) to injected decoder."""
+        (pkt0,) = _load("priv_sq_ch1.pkt0.bin")
         transport = FakeTransport()
-        transport.set_raw(pkt0, pkt1, pkt0, pkt1)
+        transport.set_raw(pkt0)
         transport.set_response(":CHANnel1:SCALe?", "1.000000e+00")
         transport.set_response(":CHANnel1:OFFSet?", "0.000000e+00")
         transport.open()
@@ -191,7 +212,7 @@ class TestCustomDecoder:
         reader = WaveformReader(transport)
 
         sentinel = object()
-        calls = []
+        calls: list = []
 
         def fake_decoder(frame, scales, offsets):
             calls.append((frame, scales, offsets))
@@ -208,28 +229,32 @@ class TestCustomDecoder:
 
 
 # ---------------------------------------------------------------------------
-# Test: refresh_scaling кэширует scale/offset (fps-оптимизация)
+# Test: refresh_scaling caches scale/offset (fps-optimisation)
 # ---------------------------------------------------------------------------
 
 def test_refresh_scaling_caches_values():
+    """After refresh_scaling([1]), read_decoded_frame() must not re-query :CHANnel1:SCALe?."""
     controller, transport = _make_controller_ch1()
     controller.refresh_scaling([1])
-    # Кэш заполнен -> новый кадр не должен слать :CHANnel1:SCALe? повторно
+    before = sum(1 for q in transport.queries if q == ":CHANnel1:SCALe?")
+    # Frame read must use cache — no additional :SCALe? queries.
+    controller.read_decoded_frame()
+    after = sum(1 for q in transport.queries if q == ":CHANnel1:SCALe?")
+    assert after == before, (
+        f"После refresh_scaling кадр не должен повторно запрашивать :CHANnel1:SCALe? "
+        f"(before={before}, after={after})"
+    )
+
+
+def test_clear_scaling_cache_re_enables_scale_query():
+    """After clear_scaling_cache(), the next read_decoded_frame() must re-query :CHANnel1:SCALe?."""
+    controller, transport = _make_controller_ch1()
+    controller.refresh_scaling([1])
+    controller.clear_scaling_cache()
     before = sum(1 for q in transport.queries if q == ":CHANnel1:SCALe?")
     controller.read_decoded_frame()
     after = sum(1 for q in transport.queries if q == ":CHANnel1:SCALe?")
-    assert after == before, "после refresh_scaling кадр не должен повторно запрашивать SCALe?"
-
-
-def test_cached_scaling_used_even_if_device_changes():
-    controller, transport = _make_controller_ch1()
-    transport.set_response(":CHANnel1:SCALe?", "1.000000e+00")
-    controller.refresh_scaling([1])
-    # Прибор «сменил» масштаб, но кэш держит старое значение
-    transport.set_response(":CHANnel1:SCALe?", "2.000000e+00")
-    frame = controller.read_decoded_frame()
-    assert abs(float(np.mean(frame.channels[1])) - 1.0) < 0.1, "должен использоваться кэш 1.0 V/div"
-    # После сброса кэша берётся новое значение прибора (2.0 V/div -> ~2.0 V)
-    controller.clear_scaling_cache()
-    frame2 = controller.read_decoded_frame()
-    assert abs(float(np.mean(frame2.channels[1])) - 2.0) < 0.2, "после clear берётся новый масштаб 2.0"
+    assert after > before, (
+        "После clear_scaling_cache() следующий кадр должен запросить :CHANnel1:SCALe? "
+        f"(before={before}, after={after})"
+    )

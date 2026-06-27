@@ -123,24 +123,39 @@ def test_time_axis_dtype_is_float():
 
 
 # ---------------------------------------------------------------------------
-# Real fixture — DC +1.0 V on CH1
+# Real fixture — PRIVate:WAVeform:DATA:ALL? square wave CH1 only
 # ---------------------------------------------------------------------------
 
-def test_real_fixture_dc_p1v0_ch1_mean():
+def test_real_fixture_sq_ch1_mean_centered():
     """
-    Real capture: DDS DC +1.0 V → CH1 at 1 V/div, offset=0.
-    payload = raw[29:] (skipping 29-byte ASCII prefix).
-    mean(counts_to_volts(payload, 1.0)) should be within ±0.1 V of 1.0 V.
+    Real capture: DDS square wave 2Vpp 1kHz → CH1 at 1 V/div, offset=0.
+    Packet format: PRIVate header 128 bytes + 4000 sample bytes.
+    Mean of square wave (symmetric ±25 counts) must be within ±0.1 V of 0.
     """
-    pkt1_path = FIXTURES / "frame_dc_p1v0_ch1.pkt1.bin"
-    raw = pkt1_path.read_bytes()
-    assert len(raw) == 4029, f"Unexpected fixture size: {len(raw)}"
+    pkt_path = FIXTURES / "priv_sq_ch1.pkt0.bin"
+    raw = pkt_path.read_bytes()
+    assert len(raw) == 4128, f"Unexpected fixture size: {len(raw)}"
 
-    payload = raw[29:]  # 4000 bytes of signed int8 samples
-    assert len(payload) == 4000
+    samples = raw[128:]  # 4000 bytes of signed int8 samples
+    assert len(samples) == 4000
 
-    volts = counts_to_volts(payload, vdiv=1.0)
+    volts = counts_to_volts(samples, vdiv=1.0)
     mean_v = float(np.mean(volts))
-    assert abs(mean_v - 1.0) < 0.1, (
-        f"Mean voltage {mean_v:.4f} V deviates more than 0.1 V from expected 1.0 V"
+    assert abs(mean_v) < 0.1, (
+        f"Mean voltage {mean_v:.4f} V exceeds ±0.1 V — square wave should be centered"
+    )
+
+
+def test_real_fixture_sq_ch1_vpp():
+    """
+    Real capture: DDS square wave 2Vpp → Vpp (90th-10th percentile) ≈ 2.0 V ± 0.15.
+    """
+    pkt_path = FIXTURES / "priv_sq_ch1.pkt0.bin"
+    raw = pkt_path.read_bytes()
+    samples = raw[128:]
+
+    volts = counts_to_volts(samples, vdiv=1.0)
+    vpp = float(np.percentile(volts, 90) - np.percentile(volts, 10))
+    assert abs(vpp - 2.0) < 0.15, (
+        f"Vpp (perc90-10) = {vpp:.4f} V, expected 2.0 V ± 0.15"
     )

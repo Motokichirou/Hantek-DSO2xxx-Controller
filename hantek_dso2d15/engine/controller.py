@@ -6,8 +6,6 @@
 """
 from __future__ import annotations
 
-from dataclasses import replace
-
 from hantek_dso2d15.waveform.decode import decode_frame, DecodedFrame
 from hantek_dso2d15.waveform.reader import RawFrame
 
@@ -82,28 +80,10 @@ class AcquisitionController:
             Декодированный кадр с напряжениями и временной осью.
         """
         frame: RawFrame = self._reader.read_frame()
-
-        # Квирк прошивки DSO2D15 3.0.0 (HARDWARE-VERIFIED 2026-06-27):
-        # :WAVeform:DATA:ALL? возвращает сэмплы ТОЛЬКО CH1, продублированные по
-        # числу включённых каналов (:WAVeform:SOURce не переключает; подтверждено
-        # offset-подписью). Дедуплицируем одинаковые payload и сопоставляем
-        # реальные данные первым включённым каналам. Если будущая прошивка/команда
-        # начнёт отдавать различные пакеты — покажутся все каналы (forward-compatible).
-        unique: list[bytes] = []
-        for payload in frame.data_payloads:
-            if payload not in unique:
-                unique.append(payload)
-
-        enabled = frame.header.enabled_channels
-        use_channels = enabled[: len(unique)] if unique else enabled[:1]
-
-        scales = {n: self._scale_for(n) for n in use_channels}
-        offsets = {n: self._offset_for(n) for n in use_channels}
-        corrected = RawFrame(
-            header=replace(frame.header, enabled_channels=list(use_channels)),
-            data_payloads=unique[: len(use_channels)],
-        )
-        return self._decoder(corrected, scales, offsets)
+        chans = frame.header.enabled_channels
+        scales = {n: self._scale_for(n) for n in chans}
+        offsets = {n: self._offset_for(n) for n in chans}
+        return self._decoder(frame, scales, offsets)
 
     def force(self) -> None:
         """Отправить принудительный триггер (:TRIGger:FORCe).

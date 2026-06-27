@@ -9,6 +9,7 @@ from __future__ import annotations
 from PySide6.QtCore import Qt, QThread, QMetaObject, QElapsedTimer, Slot
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QToolBar, QComboBox, QPushButton, QLabel, QSizePolicy,
+    QDockWidget, QTabWidget, QScrollArea,
 )
 
 from hantek_dso2d15.transport.visa_transport import VisaTransport
@@ -18,12 +19,17 @@ from hantek_dso2d15.engine.controller import AcquisitionController
 from hantek_dso2d15.engine.worker import EngineWorker
 from hantek_dso2d15.engine.states import RunState
 from hantek_dso2d15.gui.plot_widget import ScopePlot
+from hantek_dso2d15.gui.panels.vertical import VerticalPanel
 
 STYLE = """
 QMainWindow, QWidget { background: #0E0F12; color: #C5C9D1; }
 QToolBar { background: #16181D; border: none; spacing: 8px; padding: 6px; }
 QComboBox { background: #0E0F12; border: 1px solid #2A2D34; border-radius: 5px;
-            padding: 4px 8px; color: #E6E9EF; min-width: 320px; }
+            padding: 4px 8px; color: #E6E9EF; }
+QComboBox#resources { min-width: 320px; }
+QDoubleSpinBox { background: #0E0F12; border: 1px solid #2A2D34; border-radius: 4px;
+                 padding: 3px 6px; color: #E6E9EF; }
+QCheckBox { color: #9AA0AC; }
 QPushButton { background: #1B1E24; border: 1px solid #2A2D34; border-radius: 5px;
               padding: 6px 14px; color: #C5C9D1; font-weight: 600; }
 QPushButton:hover { border-color: #3A3F49; }
@@ -33,6 +39,10 @@ QPushButton#single { color: #F5A623; border-color: #6A521E; }
 QPushButton:disabled { color: #5A606C; }
 QStatusBar { background: #16181D; color: #6E747F; }
 QLabel { color: #9AA0AC; }
+QDockWidget { color: #AEB4BF; }
+QTabWidget::pane { border: none; background: #13151A; }
+QTabBar::tab { background: #16181D; color: #7A808C; padding: 8px 14px; border: none; }
+QTabBar::tab:selected { color: #E6E9EF; border-bottom: 2px solid #37D67A; }
 """
 
 
@@ -49,7 +59,6 @@ class MainWindow(QMainWindow):
         self._controller = None
         self._worker = None
         self._thread = None
-        self._scales: dict[int, float] = {}
         self._fps_timer = QElapsedTimer()
         self._frame_count = 0
 
@@ -63,6 +72,7 @@ class MainWindow(QMainWindow):
         self.addToolBar(tb)
 
         self._resources = QComboBox()
+        self._resources.setObjectName("resources")
         self._refresh_resources()
         tb.addWidget(self._resources)
 
@@ -89,6 +99,30 @@ class MainWindow(QMainWindow):
         self._btn_single.clicked.connect(self._single)
         self._btn_single.setEnabled(False)
         tb.addWidget(self._btn_single)
+
+        # --- правый док: табы Scope / Generator / Sweep ---
+        self._dock = QDockWidget("", self)
+        self._dock.setFeatures(QDockWidget.NoDockWidgetFeatures)
+        self._dock.setTitleBarWidget(QWidget())  # без заголовка
+        self._tabs = QTabWidget()
+        self._tabs.setMinimumWidth(360)
+        self._tabs.setMaximumWidth(420)
+
+        # Scope-таб: прокручиваемый аккордеон панелей (пока — Vertical)
+        self._vertical = VerticalPanel(channels=(1, 2))
+        self._vertical.setEnabled(False)
+        # settingChanged подключается напрямую к слоту воркера (QueuedConnection)
+        # в _connect — Qt сам маршалит (path, value) в поток воркера.
+        scope_scroll = QScrollArea()
+        scope_scroll.setWidgetResizable(True)
+        scope_scroll.setFrameShape(QScrollArea.NoFrame)
+        scope_scroll.setWidget(self._vertical)
+
+        self._tabs.addTab(scope_scroll, "Scope")
+        self._tabs.addTab(QWidget(), "Generator")
+        self._tabs.addTab(QWidget(), "Sweep")
+        self._dock.setWidget(self._tabs)
+        self.addDockWidget(Qt.RightDockWidgetArea, self._dock)
 
         # --- статус-бар ---
         self._lbl_conn = QLabel("● offline")
@@ -136,8 +170,8 @@ class MainWindow(QMainWindow):
             self._scope.trigger.sweep = "AUTO"
             self._controller = AcquisitionController(self._scope, WaveformReader(self._transport))
             self._controller.refresh_scaling([1, 2])
-            # масштабы (V/дел) для перевода вольт в деления на графике
-            self._scales = {1: self._scope.channel[1].scale, 2: self._scope.channel[2].scale}
+            # заполнить панель Vertical текущими настройками (главный поток, до старта воркера)
+            self._vertical.load_from_scope(self._scope)
         except Exception as exc:  # noqa: BLE001
             self._lbl_idn.setText(f"Ошибка подключения: {exc}")
             self._scope = None
@@ -150,17 +184,28 @@ class MainWindow(QMainWindow):
         self._worker.frameReady.connect(self._on_frame)
         self._worker.errorOccurred.connect(self._on_error)
         self._worker.stateChanged.connect(self._on_state)
+        # контролы панелей → слот воркера в его потоке (Qt маршалит payload)
+        self._vertical.settingChanged.connect(
+            self._worker.apply_setting, Qt.ConnectionType.QueuedConnection
+        )
+        # readback с прибора → синхронизация панели (scale вслед за probe, кламп offset)
+        self._worker.channelReadback.connect(self._vertical.update_readback)
         self._thread.start()
 
         self._btn_connect.setText("Disconnect")
         self._btn_run.setEnabled(True)
         self._btn_single.setEnabled(True)
+        self._vertical.setEnabled(True)
         self._lbl_conn.setText("● connected")
         self._lbl_conn.setStyleSheet("color: #37D67A;")
         self._lbl_idn.setText(idn)
 
     def _disconnect(self):
         if self._worker is not None:
+            try:
+                self._vertical.settingChanged.disconnect(self._worker.apply_setting)
+            except (RuntimeError, TypeError):
+                pass
             QMetaObject.invokeMethod(self._worker, "stop", Qt.ConnectionType.QueuedConnection)
         if self._thread is not None:
             self._thread.quit()
@@ -171,9 +216,9 @@ class MainWindow(QMainWindow):
             except Exception:  # noqa: BLE001
                 pass
         self._worker = self._thread = self._controller = self._scope = self._transport = None
-        self._scales = {}
         self._running = False
         self._plot.clear()
+        self._vertical.setEnabled(False)
         self._btn_connect.setText("Connect")
         self._btn_run.setText("▶ RUN")
         self._btn_run.setObjectName("run")
@@ -183,6 +228,7 @@ class MainWindow(QMainWindow):
         self._lbl_conn.setStyleSheet("color: #5A606C;")
         self._lbl_idn.setText("")
         self._lbl_metrics.setText("")
+
 
     # ------------------------------------------------------------------
     # Управление сбором (host-side, через worker в его потоке)
@@ -209,7 +255,7 @@ class MainWindow(QMainWindow):
 
     @Slot(object)
     def _on_frame(self, decoded):
-        self._plot.update_frame(decoded, self._scales)
+        self._plot.update_frame(decoded)
         self._frame_count += 1
         fps = ""
         if self._fps_timer.isValid():

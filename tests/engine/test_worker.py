@@ -150,3 +150,85 @@ def test_single_with_error_returns_to_stopped(qapp):
     assert worker.state is RunState.STOPPED, (
         "single() при ошибке не должен залипать в SINGLE — должен уйти в STOPPED"
     )
+
+
+# ---------------------------------------------------------------------------
+# Test 6 — apply_setting(path, value): навигация по графу драйвера
+# ---------------------------------------------------------------------------
+
+class _FakeChannel:
+    def __init__(self):
+        self.scale = 1.0
+        self.offset = 0.0
+        self.probe = 1
+        self.coupling = None
+
+
+class _FakeTimebase:
+    def __init__(self):
+        self.scale = None
+
+
+class _FakeScope:
+    def __init__(self):
+        self._ch = {1: _FakeChannel(), 2: _FakeChannel()}
+        self.timebase = _FakeTimebase()
+
+    @property
+    def channel(self):
+        return self._ch
+
+
+class _ScopeController:
+    """Stub-контроллер с .scope и refresh_scaling для apply_setting."""
+    def __init__(self):
+        self.scope = _FakeScope()
+        self.refreshed = []
+
+    def refresh_scaling(self, channels):
+        self.refreshed.append(list(channels))
+
+    def read_decoded_frame(self):
+        return object()
+
+
+def test_apply_setting_channel_scale(qapp):
+    c = _ScopeController()
+    worker = EngineWorker(c)
+    worker.apply_setting("channel.1.scale", 0.5)
+    assert c.scope.channel[1].scale == 0.5
+    # смена scale канала -> refresh_scaling([1])
+    assert c.refreshed == [[1]]
+
+
+def test_apply_setting_nested_and_no_refresh(qapp):
+    c = _ScopeController()
+    worker = EngineWorker(c)
+    worker.apply_setting("timebase.scale", 1e-3)
+    worker.apply_setting("channel.2.coupling", "AC")
+    assert c.scope.timebase.scale == 1e-3
+    assert c.scope.channel[2].coupling == "AC"
+    # coupling/timebase не триггерят refresh_scaling
+    assert c.refreshed == []
+
+
+def test_apply_setting_error_emits_error(qapp):
+    c = _ScopeController()
+    worker = EngineWorker(c)
+    errors = []
+    worker.errorOccurred.connect(errors.append)
+    worker.apply_setting("channel.9.scale", 1.0)  # нет канала 9
+    assert len(errors) == 1 and "apply_setting" in errors[0]
+
+
+def test_apply_setting_emits_channel_readback(qapp):
+    """После вертикального изменения воркер возвращает фактические scale/offset/probe."""
+    c = _ScopeController()
+    c.scope.channel[1].scale = 2.0
+    c.scope.channel[1].offset = 0.5
+    c.scope.channel[1].probe = 10
+    worker = EngineWorker(c)
+    seen = []
+    worker.channelReadback.connect(lambda n, s, o, p: seen.append((n, s, o, p)))
+    worker.apply_setting("channel.1.probe", 10)
+    assert seen == [(1, 2.0, 0.5, 10)]

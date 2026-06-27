@@ -39,6 +39,11 @@ class AcquisitionController:
         self._scale_cache: dict[int, float] = {}
         self._offset_cache: dict[int, float] = {}
 
+    @property
+    def scope(self):
+        """Драйвер прибора (для управляющих записей из потока воркера)."""
+        return self._scope
+
     def refresh_scaling(self, channels=(1, 2, 3, 4)) -> None:
         """Запросить и закэшировать scale/offset указанных каналов.
 

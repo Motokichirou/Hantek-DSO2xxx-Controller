@@ -39,12 +39,22 @@ class DecodedFrame:
     triggered:
         ``True`` if the oscilloscope confirmed a trigger event for this
         frame; ``False`` for free-run / untriggered captures.
+    scales:
+        Per-channel volts-per-division used to decode this frame, keyed by
+        channel number. Позволяет потребителю (GUI-графикуль) показывать
+        сигнал в делениях без отдельного учёта масштабов.
+    offsets:
+        Per-channel смещение в вольтах, использованное при декодировании.
+        Для экранной позиции в делениях: ``y_div = (volts + offset) / scale``
+        (= raw_count/25) — так смещение двигает трассу, как на приборе.
     """
 
     time: np.ndarray
     channels: dict[int, np.ndarray] = field(default_factory=dict)
     srate: float = 0.0
     triggered: bool = False
+    scales: dict[int, float] = field(default_factory=dict)
+    offsets: dict[int, float] = field(default_factory=dict)
 
 
 def decode_frame(
@@ -80,10 +90,14 @@ def decode_frame(
     _offsets: dict[int, float] = offsets if offsets is not None else {}
 
     channels: dict[int, np.ndarray] = {}
+    used_scales: dict[int, float] = {}
+    used_offsets: dict[int, float] = {}
     for i, ch in enumerate(frame.header.enabled_channels):
         vdiv = scales[ch]
         offset_v = _offsets.get(ch, 0.0)
         channels[ch] = counts_to_volts(frame.data_payloads[i], vdiv, offset_v)
+        used_scales[ch] = vdiv
+        used_offsets[ch] = offset_v
 
     # Build the time axis from the length of the first decoded channel.
     first_ch = frame.header.enabled_channels[0]
@@ -95,4 +109,6 @@ def decode_frame(
         channels=channels,
         srate=frame.header.srate,
         triggered=frame.header.triggered,
+        scales=used_scales,
+        offsets=used_offsets,
     )

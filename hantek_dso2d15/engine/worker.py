@@ -44,6 +44,9 @@ class EngineWorker(QObject):
     frameReady = Signal(object)
     errorOccurred = Signal(str)
     stateChanged = Signal(object)
+    #: после вертикального изменения канала — фактические значения с прибора
+    #: (n, scale, offset, probe) для синхронизации панели (прибор = источник истины).
+    channelReadback = Signal(int, float, float, int)
 
     def __init__(self, controller, interval_ms: int = 50, parent=None) -> None:
         super().__init__(parent)
@@ -105,3 +108,38 @@ class EngineWorker(QObject):
             # Одиночный режим всегда завершается в STOPPED, даже после ошибки.
             if self._state is RunState.SINGLE:
                 self.stop()
+
+    @Slot(str, object)
+    def apply_setting(self, path: str, value) -> None:
+        """Применить настройку прибора из потока воркера (VISA-I/O не на UI-потоке).
+
+        Универсальный механизм для всех панелей. Выполняется в потоке воркера
+        через queued-сигнал — сериализуется с захватом кадров, поэтому транспорта
+        касается только один поток.
+
+        ``path`` — точечный путь по объектному графу драйвера, числовые токены =
+        индексы. Примеры:
+          - ``"channel.1.scale"``   → ``scope.channel[1].scale = value``
+          - ``"timebase.scale"``    → ``scope.timebase.scale = value``
+          - ``"trigger.edge.level"``→ ``scope.trigger.edge.level = value``
+          - ``"trigger.sweep"``     → ``scope.trigger.sweep = value``
+
+        После смены ``channel.N.scale|offset`` обновляет кэш масштабов контроллера.
+        """
+        try:
+            parts = path.split(".")
+            obj = self._controller.scope
+            for token in parts[:-1]:
+                obj = obj[int(token)] if token.isdigit() else getattr(obj, token)
+            setattr(obj, parts[-1], value)
+
+            # после вертикального изменения канала: пересчитать кэш масштабов и
+            # вернуть панели фактические значения (прибор мог авто-сменить scale
+            # вслед за probe или зажать offset).
+            if len(parts) == 3 and parts[0] == "channel" and parts[2] in ("scale", "offset", "probe"):
+                n = int(parts[1])
+                self._controller.refresh_scaling([n])
+                ch = self._controller.scope.channel[n]
+                self.channelReadback.emit(n, float(ch.scale), float(ch.offset), int(ch.probe))
+        except Exception as exc:  # noqa: BLE001
+            self.errorOccurred.emit(f"apply_setting({path}={value!r}): {exc}")

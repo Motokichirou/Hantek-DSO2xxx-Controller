@@ -164,6 +164,11 @@ class EngineWorker(QObject):
         После смены ``channel.N.scale|offset`` обновляет кэш масштабов контроллера.
         """
         try:
+            # Действия (не setattr): одиночный запуск пакета генератора.
+            if path == "dds.burst_trigger":
+                self._controller.scope.dds.burst_trigger()
+                return
+
             parts = path.split(".")
             obj = self._controller.scope
             for token in parts[:-1]:

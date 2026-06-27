@@ -17,6 +17,7 @@ from hantek_dso2d15.scpi.timebase import Timebase
 from hantek_dso2d15.scpi.acquire import Acquire
 from hantek_dso2d15.scpi.trigger import Trigger
 from hantek_dso2d15.scpi.measure import Measure
+from hantek_dso2d15.scpi.dds import DDS
 
 
 class ChannelCollection:
@@ -76,6 +77,7 @@ class Scope:
         acquire:  Acquire  — подсистема сбора данных.
         trigger:  Trigger  — подсистема триггера.
         measure:  Measure  — подсистема автоизмерений.
+        dds:      DDS      — встроенный генератор сигналов (AWG).
     """
 
     def __init__(self, transport) -> None:
@@ -85,6 +87,7 @@ class Scope:
         self.acquire = Acquire(transport)
         self.trigger = Trigger(transport)
         self.measure = Measure(transport)
+        self.dds = DDS(transport)
 
     # ------------------------------------------------------------------
     # Lifecycle

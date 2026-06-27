@@ -9,7 +9,7 @@ from __future__ import annotations
 from PySide6.QtCore import Qt, QThread, QMetaObject, QElapsedTimer, Slot
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QToolBar, QComboBox, QPushButton, QLabel, QSizePolicy,
-    QDockWidget, QTabWidget, QScrollArea,
+    QDockWidget, QTabWidget, QScrollArea, QVBoxLayout,
 )
 
 from hantek_dso2d15.transport.visa_transport import VisaTransport
@@ -20,6 +20,9 @@ from hantek_dso2d15.engine.worker import EngineWorker
 from hantek_dso2d15.engine.states import RunState
 from hantek_dso2d15.gui.plot_widget import ScopePlot
 from hantek_dso2d15.gui.panels.vertical import VerticalPanel
+from hantek_dso2d15.gui.panels.horizontal import HorizontalPanel
+from hantek_dso2d15.gui.panels.trigger import TriggerPanel
+from hantek_dso2d15.gui.panels.acquire import AcquirePanel
 
 STYLE = """
 QMainWindow, QWidget { background: #0E0F12; color: #C5C9D1; }
@@ -43,6 +46,8 @@ QDockWidget { color: #AEB4BF; }
 QTabWidget::pane { border: none; background: #13151A; }
 QTabBar::tab { background: #16181D; color: #7A808C; padding: 8px 14px; border: none; }
 QTabBar::tab:selected { color: #E6E9EF; border-bottom: 2px solid #37D67A; }
+QLabel#section { background: #1B1E24; color: #AEB4BF; font-weight: 600;
+                 padding: 5px 10px; letter-spacing: 0.7px; }
 """
 
 
@@ -108,15 +113,32 @@ class MainWindow(QMainWindow):
         self._tabs.setMinimumWidth(360)
         self._tabs.setMaximumWidth(420)
 
-        # Scope-таб: прокручиваемый аккордеон панелей (пока — Vertical)
-        self._vertical = VerticalPanel(channels=(1, 2))
-        self._vertical.setEnabled(False)
-        # settingChanged подключается напрямую к слоту воркера (QueuedConnection)
+        # Scope-таб: стек панелей с заголовками секций.
+        # settingChanged каждой панели подключается к слоту воркера (QueuedConnection)
         # в _connect — Qt сам маршалит (path, value) в поток воркера.
+        self._vertical = VerticalPanel(channels=(1, 2))
+        self._horizontal = HorizontalPanel()
+        self._trigger = TriggerPanel()
+        self._acquire = AcquirePanel()
+        self._panels = [self._vertical, self._horizontal, self._trigger, self._acquire]
+
+        scope_body = QWidget()
+        sl = QVBoxLayout(scope_body)
+        sl.setContentsMargins(0, 0, 0, 0)
+        sl.setSpacing(0)
+        for title, panel in (("ВЕРТИКАЛЬ", self._vertical), ("ГОРИЗОНТАЛЬ", self._horizontal),
+                             ("ТРИГГЕР", self._trigger), ("ACQUIRE", self._acquire)):
+            hdr = QLabel(title)
+            hdr.setObjectName("section")
+            sl.addWidget(hdr)
+            panel.setEnabled(False)
+            sl.addWidget(panel)
+        sl.addStretch(1)
+
         scope_scroll = QScrollArea()
         scope_scroll.setWidgetResizable(True)
         scope_scroll.setFrameShape(QScrollArea.NoFrame)
-        scope_scroll.setWidget(self._vertical)
+        scope_scroll.setWidget(scope_body)
 
         self._tabs.addTab(scope_scroll, "Scope")
         self._tabs.addTab(QWidget(), "Generator")
@@ -170,8 +192,9 @@ class MainWindow(QMainWindow):
             self._scope.trigger.sweep = "AUTO"
             self._controller = AcquisitionController(self._scope, WaveformReader(self._transport))
             self._controller.refresh_scaling([1, 2])
-            # заполнить панель Vertical текущими настройками (главный поток, до старта воркера)
-            self._vertical.load_from_scope(self._scope)
+            # заполнить панели текущими настройками (главный поток, до старта воркера)
+            for panel in self._panels:
+                panel.load_from_scope(self._scope)
         except Exception as exc:  # noqa: BLE001
             self._lbl_idn.setText(f"Ошибка подключения: {exc}")
             self._scope = None
@@ -185,27 +208,30 @@ class MainWindow(QMainWindow):
         self._worker.errorOccurred.connect(self._on_error)
         self._worker.stateChanged.connect(self._on_state)
         # контролы панелей → слот воркера в его потоке (Qt маршалит payload)
-        self._vertical.settingChanged.connect(
-            self._worker.apply_setting, Qt.ConnectionType.QueuedConnection
-        )
-        # readback с прибора → синхронизация панели (scale вслед за probe, кламп offset)
+        for panel in self._panels:
+            panel.settingChanged.connect(
+                self._worker.apply_setting, Qt.ConnectionType.QueuedConnection
+            )
+        # readback с прибора → синхронизация панели Vertical (scale вслед за probe, кламп offset)
         self._worker.channelReadback.connect(self._vertical.update_readback)
         self._thread.start()
 
         self._btn_connect.setText("Disconnect")
         self._btn_run.setEnabled(True)
         self._btn_single.setEnabled(True)
-        self._vertical.setEnabled(True)
+        for panel in self._panels:
+            panel.setEnabled(True)
         self._lbl_conn.setText("● connected")
         self._lbl_conn.setStyleSheet("color: #37D67A;")
         self._lbl_idn.setText(idn)
 
     def _disconnect(self):
         if self._worker is not None:
-            try:
-                self._vertical.settingChanged.disconnect(self._worker.apply_setting)
-            except (RuntimeError, TypeError):
-                pass
+            for panel in self._panels:
+                try:
+                    panel.settingChanged.disconnect(self._worker.apply_setting)
+                except (RuntimeError, TypeError):
+                    pass
             QMetaObject.invokeMethod(self._worker, "stop", Qt.ConnectionType.QueuedConnection)
         if self._thread is not None:
             self._thread.quit()
@@ -218,7 +244,8 @@ class MainWindow(QMainWindow):
         self._worker = self._thread = self._controller = self._scope = self._transport = None
         self._running = False
         self._plot.clear()
-        self._vertical.setEnabled(False)
+        for panel in self._panels:
+            panel.setEnabled(False)
         self._btn_connect.setText("Connect")
         self._btn_run.setText("▶ RUN")
         self._btn_run.setObjectName("run")

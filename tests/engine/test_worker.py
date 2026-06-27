@@ -232,3 +232,249 @@ def test_apply_setting_emits_channel_readback(qapp):
     worker.channelReadback.connect(lambda n, s, o, p: seen.append((n, s, o, p)))
     worker.apply_setting("channel.1.probe", 10)
     assert seen == [(1, 2.0, 0.5, 10)]
+
+
+# ---------------------------------------------------------------------------
+# Фейки для тестирования set_measurements / measurementsReady
+# ---------------------------------------------------------------------------
+
+class _FakeMeasureW:
+    """Фейк scope.measure для тестов воркера — имитирует MeasurementDriver.enable."""
+
+    def __init__(self):
+        self.enable: bool = False
+
+    def read_item(self, channel: int, item: str) -> float:
+        raise NotImplementedError("_FakeMeasureW.read_item не используется в этих тестах")
+
+
+class _FakeScopeW:
+    """Фейк scope с поддержкой .measure для тестов воркера."""
+
+    def __init__(self):
+        self.measure = _FakeMeasureW()
+        self._channels: dict = {}
+
+    @property
+    def channel(self):
+        return self._channels
+
+
+class _ControllerWithMeasure:
+    """Stub-контроллер для тестирования измерительного пути воркера.
+
+    Всегда возвращает успешный кадр. read_measurements() возвращает фиктивный
+    payload или бросает исключение (если raise_measurements=True).
+    """
+
+    def __init__(
+        self,
+        marker=None,
+        raise_measurements: bool = False,
+    ):
+        self._marker = marker or object()
+        self.scope = _FakeScopeW()
+        self._raise_measurements = raise_measurements
+        self.measurement_calls: list = []  # журнал вызовов read_measurements
+
+    def read_decoded_frame(self):
+        return self._marker
+
+    def read_measurements(self, requests: list) -> list:
+        self.measurement_calls.append(list(requests))
+        if self._raise_measurements:
+            raise RuntimeError("measurement error")
+        return [
+            {"channel": int(ch), "item": str(item), "value": 1.0}
+            for ch, item in requests
+        ]
+
+    def refresh_scaling(self, channels):
+        pass
+
+
+class _ControllerErrorFrame:
+    """Stub-контроллер, который всегда падает на read_decoded_frame."""
+
+    def __init__(self):
+        self.scope = _FakeScopeW()
+        self.measurement_calls: list = []
+
+    def read_decoded_frame(self):
+        raise RuntimeError("frame error")
+
+    def read_measurements(self, requests: list) -> list:
+        self.measurement_calls.append(list(requests))
+        return []
+
+    def refresh_scaling(self, channels):
+        pass
+
+
+# ---------------------------------------------------------------------------
+# Test 7 — set_measurements: хранение и нормализация запросов
+# ---------------------------------------------------------------------------
+
+def test_set_measurements_default_empty(qapp):
+    """По умолчанию _measure_requests пуст — измерения не активны."""
+    c = _ControllerWithMeasure()
+    worker = EngineWorker(c)
+    assert worker._measure_requests == []
+
+
+def test_set_measurements_stores_requests(qapp):
+    """set_measurements сохраняет список запросов."""
+    c = _ControllerWithMeasure()
+    worker = EngineWorker(c)
+    worker.set_measurements([(1, "FREQ"), (2, "VPP")])
+    assert worker._measure_requests == [(1, "FREQ"), (2, "VPP")]
+
+
+def test_set_measurements_normalizes_to_tuple(qapp):
+    """Элементы нормализуются к tuple(int, str) — список вместо кортежа тоже принимается."""
+    c = _ControllerWithMeasure()
+    worker = EngineWorker(c)
+    worker.set_measurements([[1, "FREQ"]])  # список вместо кортежа
+    assert worker._measure_requests == [(1, "FREQ")]
+    assert isinstance(worker._measure_requests[0], tuple)
+
+
+def test_set_measurements_non_empty_enables_measure(qapp):
+    """Непустой список запросов → measure.enable выставляется в True."""
+    c = _ControllerWithMeasure()
+    worker = EngineWorker(c)
+    assert c.scope.measure.enable is False
+    worker.set_measurements([(1, "FREQ")])
+    assert c.scope.measure.enable is True
+
+
+def test_set_measurements_empty_does_not_enable_measure(qapp):
+    """Пустой список запросов → measure.enable не трогается (остаётся False)."""
+    c = _ControllerWithMeasure()
+    worker = EngineWorker(c)
+    worker.set_measurements([])
+    assert c.scope.measure.enable is False
+
+
+def test_set_measurements_replaces_previous(qapp):
+    """Повторный вызов set_measurements заменяет предыдущие запросы."""
+    c = _ControllerWithMeasure()
+    worker = EngineWorker(c)
+    worker.set_measurements([(1, "FREQ"), (2, "VPP")])
+    worker.set_measurements([(1, "MEAN")])
+    assert worker._measure_requests == [(1, "MEAN")]
+
+
+# ---------------------------------------------------------------------------
+# Test 8 — measurementsReady: эмиссия после успешного кадра
+# ---------------------------------------------------------------------------
+
+def test_measurements_not_emitted_when_no_requests(qapp):
+    """Пустой _measure_requests → measurementsReady НЕ эмитится."""
+    c = _ControllerWithMeasure()
+    worker = EngineWorker(c)
+
+    payloads = []
+    worker.measurementsReady.connect(payloads.append)
+
+    worker.capture_once()
+
+    assert payloads == [], "measurementsReady не должен эмитится без активных запросов"
+
+
+def test_measurements_emitted_after_successful_frame(qapp):
+    """После успешного кадра measurementsReady эмитится с корректным payload."""
+    marker = object()
+    c = _ControllerWithMeasure(marker=marker)
+    worker = EngineWorker(c)
+    worker.set_measurements([(1, "FREQ")])
+
+    frames = []
+    payloads = []
+    worker.frameReady.connect(frames.append)
+    worker.measurementsReady.connect(payloads.append)
+
+    worker.capture_once()
+
+    assert len(frames) == 1, "frameReady должен быть испущен"
+    assert len(payloads) == 1, "measurementsReady должен быть испущен ровно один раз"
+    payload = payloads[0]
+    assert isinstance(payload, list)
+    assert len(payload) == 1
+    assert payload[0] == {"channel": 1, "item": "FREQ", "value": 1.0}
+
+
+def test_measurements_payload_structure(qapp):
+    """Каждый элемент payload содержит ровно три ключа: channel, item, value."""
+    c = _ControllerWithMeasure()
+    worker = EngineWorker(c)
+    worker.set_measurements([(1, "FREQ"), (2, "VPP")])
+
+    payloads = []
+    worker.measurementsReady.connect(payloads.append)
+
+    worker.capture_once()
+
+    assert len(payloads) == 1
+    payload = payloads[0]
+    assert len(payload) == 2
+    for item in payload:
+        assert set(item.keys()) == {"channel", "item", "value"}
+
+
+def test_measurements_emitted_in_single_mode(qapp):
+    """measurementsReady эмитится и в режиме single() (не только в run-цикле)."""
+    c = _ControllerWithMeasure()
+    worker = EngineWorker(c)
+    worker.set_measurements([(2, "VPP")])
+
+    payloads = []
+    worker.measurementsReady.connect(payloads.append)
+
+    worker.single()
+
+    assert len(payloads) == 1, "measurementsReady должен эмититься при single()"
+    assert payloads[0][0]["channel"] == 2
+    assert payloads[0][0]["item"] == "VPP"
+
+
+def test_measurements_error_does_not_stop_cycle(qapp):
+    """Исключение в read_measurements → errorOccurred, кадр всё равно испускается."""
+    c = _ControllerWithMeasure(raise_measurements=True)
+    worker = EngineWorker(c)
+    worker.set_measurements([(1, "FREQ")])
+
+    errors = []
+    frames = []
+    payloads = []
+    worker.errorOccurred.connect(errors.append)
+    worker.frameReady.connect(frames.append)
+    worker.measurementsReady.connect(payloads.append)
+
+    worker.capture_once()
+
+    # Кадр должен быть испущен — ошибка измерений не ломает кадровый путь
+    assert len(frames) == 1, "frameReady должен быть испущен несмотря на ошибку измерений"
+    # Ошибка измерений должна быть эмитирована
+    assert len(errors) == 1, "errorOccurred должен быть испущен при ошибке read_measurements"
+    assert "measurement error" in errors[0]
+    # measurementsReady не эмитируется при ошибке
+    assert payloads == []
+
+
+def test_measurements_not_called_when_frame_fails(qapp):
+    """Если read_decoded_frame падает — read_measurements не вызывается."""
+    c = _ControllerErrorFrame()
+    worker = EngineWorker(c)
+    worker._measure_requests = [(1, "FREQ")]  # напрямую, минуя set_measurements (нет measure.enable)
+
+    errors = []
+    payloads = []
+    worker.errorOccurred.connect(errors.append)
+    worker.measurementsReady.connect(payloads.append)
+
+    worker.capture_once()
+
+    assert "frame error" in errors[0], "errorOccurred должен нести текст ошибки кадра"
+    assert payloads == [], "measurementsReady не должен эмититься при ошибке кадра"
+    assert c.measurement_calls == [], "read_measurements не должен вызываться при ошибке кадра"

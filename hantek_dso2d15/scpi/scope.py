@@ -16,6 +16,7 @@ from hantek_dso2d15.scpi.channel import Channel
 from hantek_dso2d15.scpi.timebase import Timebase
 from hantek_dso2d15.scpi.acquire import Acquire
 from hantek_dso2d15.scpi.trigger import Trigger
+from hantek_dso2d15.scpi.measure import Measure
 
 
 class ChannelCollection:
@@ -74,6 +75,7 @@ class Scope:
         timebase: Timebase — подсистема временной развёртки.
         acquire:  Acquire  — подсистема сбора данных.
         trigger:  Trigger  — подсистема триггера.
+        measure:  Measure  — подсистема автоизмерений.
     """
 
     def __init__(self, transport) -> None:
@@ -82,6 +84,7 @@ class Scope:
         self.timebase = Timebase(transport)
         self.acquire = Acquire(transport)
         self.trigger = Trigger(transport)
+        self.measure = Measure(transport)
 
     # ------------------------------------------------------------------
     # Lifecycle

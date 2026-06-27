@@ -23,6 +23,7 @@ from hantek_dso2d15.gui.panels.vertical import VerticalPanel
 from hantek_dso2d15.gui.panels.horizontal import HorizontalPanel
 from hantek_dso2d15.gui.panels.trigger import TriggerPanel
 from hantek_dso2d15.gui.panels.acquire import AcquirePanel
+from hantek_dso2d15.gui.panels.measure import MeasurePanel
 
 STYLE = """
 QMainWindow, QWidget { background: #0E0F12; color: #C5C9D1; }
@@ -132,6 +133,9 @@ class MainWindow(QMainWindow):
         self._horizontal = HorizontalPanel()
         self._trigger = TriggerPanel()
         self._acquire = AcquirePanel()
+        self._measure = MeasurePanel()
+        # settingChanged-панели (маршрутизируются в apply_setting воркера).
+        # Measure имеет иной поток данных (см. проводку в _connect), потому отдельно.
         self._panels = [self._vertical, self._horizontal, self._trigger, self._acquire]
 
         scope_body = QWidget()
@@ -139,7 +143,8 @@ class MainWindow(QMainWindow):
         sl.setContentsMargins(0, 0, 0, 0)
         sl.setSpacing(0)
         for title, panel in (("ВЕРТИКАЛЬ", self._vertical), ("ГОРИЗОНТАЛЬ", self._horizontal),
-                             ("ТРИГГЕР", self._trigger), ("ACQUIRE", self._acquire)):
+                             ("ТРИГГЕР", self._trigger), ("ИЗМЕРЕНИЯ", self._measure),
+                             ("ACQUIRE", self._acquire)):
             hdr = QLabel(title)
             hdr.setObjectName("section")
             sl.addWidget(hdr)
@@ -207,6 +212,7 @@ class MainWindow(QMainWindow):
             # заполнить панели текущими настройками (главный поток, до старта воркера)
             for panel in self._panels:
                 panel.load_from_scope(self._scope)
+            self._measure.load_from_scope(self._scope)
         except Exception as exc:  # noqa: BLE001
             self._lbl_idn.setText(f"Ошибка подключения: {exc}")
             self._scope = None
@@ -226,6 +232,11 @@ class MainWindow(QMainWindow):
             )
         # readback с прибора → синхронизация панели Vertical (scale вслед за probe, кламп offset)
         self._worker.channelReadback.connect(self._vertical.update_readback)
+        # Measure: набор активных строк → воркер (его поток); значения ← воркер в UI-поток
+        self._measure.measurementsChanged.connect(
+            self._worker.set_measurements, Qt.ConnectionType.QueuedConnection
+        )
+        self._worker.measurementsReady.connect(self._measure.update_values)
         self._thread.start()
 
         self._btn_connect.setText("Disconnect")
@@ -233,6 +244,7 @@ class MainWindow(QMainWindow):
         self._btn_single.setEnabled(True)
         for panel in self._panels:
             panel.setEnabled(True)
+        self._measure.setEnabled(True)
         self._lbl_conn.setText("● connected")
         self._lbl_conn.setStyleSheet("color: #37D67A;")
         self._lbl_idn.setText(idn)
@@ -258,6 +270,7 @@ class MainWindow(QMainWindow):
         self._plot.clear()
         for panel in self._panels:
             panel.setEnabled(False)
+        self._measure.setEnabled(False)
         self._btn_connect.setText("Connect")
         self._btn_run.setText("▶ RUN")
         self._btn_run.setObjectName("run")

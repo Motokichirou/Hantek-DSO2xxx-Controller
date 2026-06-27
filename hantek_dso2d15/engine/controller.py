@@ -90,6 +90,36 @@ class AcquisitionController:
         offsets = {n: self._offset_for(n) for n in chans}
         return self._decoder(frame, scales, offsets)
 
+    def read_measurements(self, requests: list) -> list:
+        """Опросить автоизмерения для заданных пар (channel, item).
+
+        Вызывает ``scope.measure.read_item(channel, item)`` для каждой пары.
+        При исключении (I/O-ошибка, таймаут и т.п.) подставляет ``None``
+        вместо значения — цикл продолжается.
+
+        Parameters
+        ----------
+        requests:
+            Список пар ``(channel: int, item: str)``.
+
+        Returns
+        -------
+        list[dict]
+            Параллельный список словарей
+            ``{"channel": int, "item": str, "value": float | None}``.
+            Порядок совпадает с ``requests``. Если ``requests`` пуст — ``[]``.
+        """
+        if not requests:
+            return []
+        result = []
+        for channel, item in requests:
+            try:
+                value: float | None = self._scope.measure.read_item(channel, item)
+            except Exception:  # noqa: BLE001
+                value = None
+            result.append({"channel": channel, "item": item, "value": value})
+        return result
+
     def force(self) -> None:
         """Отправить принудительный триггер (:TRIGger:FORCe).
 

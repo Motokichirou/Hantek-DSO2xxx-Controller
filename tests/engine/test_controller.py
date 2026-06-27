@@ -258,3 +258,132 @@ def test_clear_scaling_cache_re_enables_scale_query():
         "После clear_scaling_cache() следующий кадр должен запросить :CHANnel1:SCALe? "
         f"(before={before}, after={after})"
     )
+
+
+# ---------------------------------------------------------------------------
+# Фейки для тестирования read_measurements (без реального прибора)
+# ---------------------------------------------------------------------------
+
+class _FakeMeasure:
+    """Фейк scope.measure — имитирует интерфейс MeasurementDriver.
+
+    Параметры
+    ---------
+    responses:
+        dict[(channel, item)] -> float — возвращаемые значения.
+    raises:
+        dict[(channel, item)] -> Exception — исключения для конкретных пар.
+    """
+
+    def __init__(self, responses: dict | None = None, raises: dict | None = None):
+        self.enable: bool = False
+        self._responses: dict = responses or {}
+        self._raises: dict = raises or {}
+
+    def read_item(self, channel: int, item: str) -> float:
+        key = (channel, item)
+        if key in self._raises:
+            raise self._raises[key]
+        return self._responses[key]
+
+
+class _FakeScopeWithMeasure:
+    """Минимальный фейк scope с поддержкой .measure для read_measurements."""
+
+    def __init__(self, measure: _FakeMeasure):
+        self.measure = measure
+        self._channels: dict = {}
+
+    @property
+    def channel(self):
+        return self._channels
+
+
+class _FakeReaderStub:
+    """Заглушка reader — не используется в тестах read_measurements."""
+
+    def read_frame(self):
+        raise RuntimeError("_FakeReaderStub.read_frame не используется в этих тестах")
+
+
+# ---------------------------------------------------------------------------
+# Test: read_measurements — опрос автоизмерений
+# ---------------------------------------------------------------------------
+
+class TestReadMeasurements:
+    """Тесты AcquisitionController.read_measurements()."""
+
+    def _make_controller(
+        self,
+        responses: dict | None = None,
+        raises: dict | None = None,
+    ) -> tuple:
+        """Собрать контроллер с фейк-scope и фейк-measure."""
+        measure = _FakeMeasure(responses, raises)
+        scope = _FakeScopeWithMeasure(measure)
+        reader = _FakeReaderStub()
+        controller = AcquisitionController(scope, reader)
+        return controller, measure
+
+    def test_empty_requests_returns_empty_list(self):
+        """Пустой список requests → пустой список в ответ."""
+        controller, _ = self._make_controller()
+        result = controller.read_measurements([])
+        assert result == []
+
+    def test_single_successful_item(self):
+        """Один запрос — один словарь с корректными channel/item/value."""
+        controller, _ = self._make_controller(responses={(1, "FREQ"): 1000.0})
+        result = controller.read_measurements([(1, "FREQ")])
+        assert result == [{"channel": 1, "item": "FREQ", "value": 1000.0}]
+
+    def test_exception_yields_none_value(self):
+        """I/O-ошибка в read_item → value = None, исключение не пробрасывается."""
+        controller, _ = self._make_controller(
+            raises={(1, "FREQ"): RuntimeError("transport error")}
+        )
+        result = controller.read_measurements([(1, "FREQ")])
+        assert result == [{"channel": 1, "item": "FREQ", "value": None}]
+
+    def test_multiple_requests_preserves_order(self):
+        """Порядок результата совпадает с порядком requests."""
+        controller, _ = self._make_controller(
+            responses={(1, "FREQ"): 500.0, (2, "VPP"): 3.14, (1, "MEAN"): 0.0}
+        )
+        requests = [(1, "FREQ"), (2, "VPP"), (1, "MEAN")]
+        result = controller.read_measurements(requests)
+        assert result == [
+            {"channel": 1, "item": "FREQ", "value": 500.0},
+            {"channel": 2, "item": "VPP", "value": 3.14},
+            {"channel": 1, "item": "MEAN", "value": 0.0},
+        ]
+
+    def test_mixed_success_and_failure(self):
+        """Часть успешна, часть бросает — упавшие получают value=None."""
+        controller, _ = self._make_controller(
+            responses={(1, "FREQ"): 1000.0},
+            raises={(2, "VPP"): IOError("read error")},
+        )
+        requests = [(1, "FREQ"), (2, "VPP")]
+        result = controller.read_measurements(requests)
+        assert result == [
+            {"channel": 1, "item": "FREQ", "value": 1000.0},
+            {"channel": 2, "item": "VPP", "value": None},
+        ]
+
+    def test_does_not_modify_scaling_cache(self):
+        """read_measurements не должен трогать кэш масштабов."""
+        controller, _ = self._make_controller(responses={(1, "FREQ"): 42.0})
+        controller._scale_cache[1] = 99.0
+        controller._offset_cache[1] = -5.0
+        controller.read_measurements([(1, "FREQ")])
+        # Кэш должен остаться без изменений
+        assert controller._scale_cache[1] == 99.0
+        assert controller._offset_cache[1] == -5.0
+
+    def test_result_keys_are_channel_item_value(self):
+        """Каждый элемент результата содержит ровно три ключа: channel, item, value."""
+        controller, _ = self._make_controller(responses={(1, "RMS"): 0.707})
+        result = controller.read_measurements([(1, "RMS")])
+        assert len(result) == 1
+        assert set(result[0].keys()) == {"channel", "item", "value"}

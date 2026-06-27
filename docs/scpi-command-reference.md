@@ -350,6 +350,12 @@
 **Перечисление `<type>` измерений `:MEASure:CHANnel<n>:ITEM` (дословно):**
 `MAX, VMIN, VPP, VTOP, VBASe, VAMP, VAVG, VRMS, OVERshoot, PREShoot, MARea, MPARea, PERiod, FREQuency, RTIMe, FTIMe, PWIDth, NWIDth, PDUTy, NDUTy, RDELay, FDELay, RPHase, FPHase, TVMAX, TVMIN, PSLEWrate, NSLEWrate, VUPper, VMID, VLOWer, VARIance, PVRMS, PPULses, NPULses, PEDGes, NEDGes`
 
+> **Hardware-verified (2026-06-27, S/N CN2352029065656, FW 3.0.0):**
+> - **Чтение значения:** только форма `:MEASure:CHANnel<n>:ITEM? <type>` (тип — АРГУМЕНТ запроса). Ответ — float NR3, напр. `2.080e+00`. Форма «set `:MEASure:CHANnel<n>:ITEM <type>`, затем bare `:MEASure:CHANnel<n>:ITEM?`» НЕ работает (bare-query отдаёт мусор). README дизайна (`:MEAS:VPP? CHAN1`, `:MEASure:VPP? CHANnel1`) → VisaIOError, неверно.
+> - **`MAX` — опечатка `VMAX`:** `MAX` → sentinel `1.000e+03`; `VMAX` → корректное значение. В коде драйвера (`scpi/measure.py`) используется `VMAX`. (Список выше асимметричен: `MAX`/`VMIN` без пары — подтверждает опечатку.)
+> - **Sentinel `1.000e+03`** = «измерение недоступно для этого item/источника» (напр. межканальные `RDELay/FDELay/RPHase/FPHase` при source=одного канала; часть item'ов на меандре). Внимание: для `FREQuency` значение `1.000e+03` может быть РЕАЛЬНЫМ (1 кГц) — sentinel неотличим по значению, не фильтруется автоматически.
+> - **Полная per-литерал карта валидности** (какие item'ы реально считаются на разных сигналах/2 каналах) — TODO следующего hardware-прохода; драйвер пока принимает весь канонический список.
+
 ---
 
 ## 11. Подсистема MASK (тест допуск/брак, Pass/Fail)

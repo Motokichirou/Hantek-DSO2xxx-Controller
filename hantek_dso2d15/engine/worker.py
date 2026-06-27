@@ -47,11 +47,17 @@ class EngineWorker(QObject):
     #: после вертикального изменения канала — фактические значения с прибора
     #: (n, scale, offset, probe) для синхронизации панели (прибор = источник истины).
     channelReadback = Signal(int, float, float, int)
+    #: список dict {"channel", "item", "value"} — результат опроса автоизмерений
+    #: после каждого успешного кадра (только если активны запросы).
+    measurementsReady = Signal(object)
 
     def __init__(self, controller, interval_ms: int = 50, parent=None) -> None:
         super().__init__(parent)
         self._controller = controller
         self._state: RunState = RunState.STOPPED
+        # Список активных запросов автоизмерений. Пуст → измерения не опрашиваются.
+        # Заполняется через set_measurements(); элементы: tuple(int, str).
+        self._measure_requests: list = []
 
         self._timer = QTimer(self)
         self._timer.setInterval(interval_ms)
@@ -91,6 +97,26 @@ class EngineWorker(QObject):
         self.stateChanged.emit(self._state)
         self.capture_once()
 
+    @Slot(object)
+    def set_measurements(self, requests) -> None:
+        """Установить список активных запросов автоизмерений.
+
+        После установки непустого списка активирует ``scope.measure.enable = True``.
+        Вызывать из потока воркера (через queued-сигнал) — не из UI-потока.
+
+        Parameters
+        ----------
+        requests:
+            Итерируемый объект из пар ``(channel, item)``. Элементы нормализуются
+            к ``tuple(int, str)``. Пустой список — отключает опрос измерений.
+        """
+        self._measure_requests = [(int(ch), str(item)) for ch, item in requests]
+        if self._measure_requests:
+            try:
+                self._controller.scope.measure.enable = True
+            except Exception as exc:  # noqa: BLE001
+                self.errorOccurred.emit(f"set_measurements: {exc}")
+
     @Slot()
     def capture_once(self) -> None:
         """Тянет один кадр с контроллера и испускает frameReady или errorOccurred.
@@ -98,10 +124,21 @@ class EngineWorker(QObject):
         После захвата (успешного ИЛИ ошибочного), если текущее состояние SINGLE,
         автоматически вызывает :meth:`stop` — чтобы одиночный режим не залипал в
         SINGLE при ошибке контроллера.
+
+        Если активны запросы измерений (``_measure_requests`` непуст) — после
+        успешного ``frameReady.emit`` опрашивает ``controller.read_measurements()``
+        и испускает ``measurementsReady``. Ошибка измерений не останавливает цикл.
         """
         try:
             frame = self._controller.read_decoded_frame()
             self.frameReady.emit(frame)
+            # Опрос автоизмерений — только после успешного кадра
+            if self._measure_requests:
+                try:
+                    payload = self._controller.read_measurements(self._measure_requests)
+                    self.measurementsReady.emit(payload)
+                except Exception as exc:  # noqa: BLE001
+                    self.errorOccurred.emit(str(exc))
         except Exception as exc:  # noqa: BLE001
             self.errorOccurred.emit(str(exc))
         finally:

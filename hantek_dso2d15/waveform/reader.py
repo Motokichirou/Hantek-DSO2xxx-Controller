@@ -56,6 +56,9 @@ class WaveformReader:
 
     def __init__(self, transport) -> None:
         self._transport = transport
+        #: число USB round-trip'ов (write+read) последнего read_frame — диагностика
+        #: скорости (FPS осциллограммы ограничен числом пакетов × латентность прибора).
+        self.last_packets: int = 0
 
     def read_frame(self, max_packets: int | None = None) -> RawFrame:
         """Прочитать один полный кадр осциллограммы (все включённые каналы).
@@ -117,6 +120,7 @@ class WaveformReader:
                 f"(собрано {got}/{total} байт, limit={limit})."
             )
 
+        self.last_packets = iterations
         header = parse_header(meta)
         channel_count = len(header.enabled_channels)
         data = bytes(buffer)

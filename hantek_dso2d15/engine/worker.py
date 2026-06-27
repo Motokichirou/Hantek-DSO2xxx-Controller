@@ -51,6 +51,8 @@ class EngineWorker(QObject):
     frameReady = Signal(object)
     errorOccurred = Signal(str)
     stateChanged = Signal(object)
+    #: диагностика кадра: (мс чтения осциллограммы, мс опроса измерений, число USB-пакетов).
+    diagTiming = Signal(float, float, int)
     #: после вертикального изменения канала — фактические значения с прибора
     #: (n, scale, offset, probe) для синхронизации панели (прибор = источник истины).
     channelReadback = Signal(int, float, float, int)
@@ -79,6 +81,22 @@ class EngineWorker(QObject):
         # Список активных запросов автоизмерений. Пуст → измерения не опрашиваются.
         # Заполняется через set_measurements(); элементы: tuple(int, str).
         self._measure_requests: list = []
+        # --- Измерения: round-robin + кэш + троттлинг UI ---------------------
+        # Каждое измерение — отдельный синхронный VISA round-trip. Опрашивать ВЕСЬ
+        # набор за один кадр = надолго застопорить поток сбора (и спровоцировать
+        # десинк USBTMC → «кадр не собран»). Поэтому на каждый кадр опрашиваем лишь
+        # _measure_batch измерений по кругу, накапливая значения в кэш; в UI отдаём
+        # полный снимок кэша не чаще _emit_period (чтобы не перестраивать таблицу
+        # каждый кадр). Так поток сбора не стопорится, а измерения обновляются «волной».
+        self._measure_cache: dict[tuple[int, str], float | None] = {}
+        self._measure_rr: int = 0              # указатель round-robin по _measure_requests
+        self._measure_batch: int = 2           # измерений за один опрос (bounded стоимость)
+        # Каденция опроса: измерения опрашиваются НЕ каждый кадр, а не чаще
+        # _measure_poll_period. Между опросами кадры читаются и рисуются свободно —
+        # поэтому FPS дисплея не зависит от стоимости (возможно медленных) measure-запросов.
+        self._measure_poll_period: float = 0.2  # с (≈5 опросов/сек)
+        self._last_poll_t: float | None = None
+        self._force_full_measure: bool = False  # single(): опросить ВЕСЬ набор за раз
         # Флаг отмены свипа (потокобезопасен; выставляется из GUI-потока).
         self._sweep_cancel = threading.Event()
 
@@ -103,6 +121,7 @@ class EngineWorker(QObject):
     def start(self) -> None:
         """Перевести в режим непрерывного сбора (RUNNING) и запустить таймер."""
         self._state = RunState.RUNNING
+        self._last_poll_t = None   # первый кадр прогона сразу опрашивает измерения
         self._timer.start()
         self.stateChanged.emit(self._state)
 
@@ -117,6 +136,8 @@ class EngineWorker(QObject):
     def single(self) -> None:
         """Одиночный захват: SINGLE → capture_once() → STOPPED."""
         self._state = RunState.SINGLE
+        self._force_full_measure = True   # одиночный захват меряет ВЕСЬ набор
+        self._last_poll_t = None          # и сразу опрашивает (минуя каденцию)
         self.stateChanged.emit(self._state)
         self.capture_once()
 
@@ -134,11 +155,52 @@ class EngineWorker(QObject):
             к ``tuple(int, str)``. Пустой список — отключает опрос измерений.
         """
         self._measure_requests = [(int(ch), str(item)) for ch, item in requests]
+        # новый набор → сбросить round-robin и кэш (старые ключи неактуальны)
+        self._measure_cache = {}
+        self._measure_rr = 0
+        self._last_poll_t = None
         if self._measure_requests:
             try:
                 self._controller.scope.measure.enable = True
             except Exception as exc:  # noqa: BLE001
                 self.errorOccurred.emit(f"set_measurements: {exc}")
+
+    def _poll_measure_batch(self) -> None:
+        """Опросить очередную порцию измерений (round-robin) и обновить кэш.
+
+        Обычный кадр: _measure_batch измерений по кругу. После single() (флаг
+        _force_full_measure) — весь набор за раз (одиночный захват меряет всё).
+        """
+        reqs = self._measure_requests
+        n = len(reqs)
+        if n == 0:
+            return
+        if self._force_full_measure:
+            batch = list(reqs)
+            self._force_full_measure = False
+            self._measure_rr = 0
+        else:
+            k = min(self._measure_batch, n)
+            batch = [reqs[(self._measure_rr + i) % n] for i in range(k)]
+            self._measure_rr = (self._measure_rr + k) % n
+        for d in self._controller.read_measurements(batch):
+            self._measure_cache[(int(d["channel"]), str(d["item"]))] = d.get("value")
+
+    def _should_poll_measures(self) -> bool:
+        """True, если пора опросить порцию измерений (каденция _measure_poll_period).
+
+        Первый раз после старта/single (_last_poll_t is None) — всегда.
+        """
+        if self._last_poll_t is None:
+            return True
+        return (time.monotonic() - self._last_poll_t) >= self._measure_poll_period
+
+    def _measure_snapshot(self) -> list:
+        """Полный снимок кэша в порядке _measure_requests (неопрошенные → value None)."""
+        return [
+            {"channel": ch, "item": item, "value": self._measure_cache.get((ch, item))}
+            for (ch, item) in self._measure_requests
+        ]
 
     @Slot()
     def capture_once(self) -> None:
@@ -153,15 +215,25 @@ class EngineWorker(QObject):
         и испускает ``measurementsReady``. Ошибка измерений не останавливает цикл.
         """
         try:
+            t0 = time.monotonic()
             frame = self._controller.read_decoded_frame()
+            read_ms = (time.monotonic() - t0) * 1000.0
             self.frameReady.emit(frame)
-            # Опрос автоизмерений — только после успешного кадра
-            if self._measure_requests:
+            # Автоизмерения после успешного кадра: round-robin порция в кэш (bounded
+            # стоимость на кадр), снимок в UI — троттлинг _emit_period. Это не даёт
+            # потоку сбора стопориться на залпе из N запросов (и рвать осциллограмму).
+            meas_ms = 0.0
+            if self._measure_requests and self._should_poll_measures():
                 try:
-                    payload = self._controller.read_measurements(self._measure_requests)
-                    self.measurementsReady.emit(payload)
+                    tm = time.monotonic()
+                    self._poll_measure_batch()
+                    self._last_poll_t = time.monotonic()   # ПОСЛЕ опроса (без back-to-back)
+                    meas_ms = (self._last_poll_t - tm) * 1000.0
+                    self.measurementsReady.emit(self._measure_snapshot())
                 except Exception as exc:  # noqa: BLE001
                     self.errorOccurred.emit(str(exc))
+            packets = int(getattr(self._controller, "last_read_packets", 0))
+            self.diagTiming.emit(read_ms, meas_ms, packets)
         except Exception as exc:  # noqa: BLE001
             self.errorOccurred.emit(str(exc))
         finally:

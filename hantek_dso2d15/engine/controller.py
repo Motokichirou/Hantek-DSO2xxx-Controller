@@ -95,6 +95,11 @@ class AcquisitionController:
         except Exception:  # noqa: BLE001
             self._trig_source_cache = None
 
+    @property
+    def last_read_packets(self) -> int:
+        """Число USB-пакетов последнего чтения осциллограммы (диагностика скорости)."""
+        return getattr(self._reader, "last_packets", 0)
+
     def _scale_for(self, n: int) -> float:
         if n in self._scale_cache:
             return self._scale_cache[n]

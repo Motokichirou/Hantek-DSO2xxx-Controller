@@ -26,6 +26,9 @@ _CHEVRON_FG     = "#6E747F"   # шеврон
 _CHEVRON_EXPANDED  = "▾"   # секция развёрнута
 _CHEVRON_COLLAPSED = "▸"   # секция свёрнута
 
+HEADER_HEIGHT = 32         # высота шапки (для клампа высоты свёрнутой секции)
+_QWIDGETSIZE_MAX = 16_777_215   # снятие ограничения высоты (Qt-предел)
+
 # QSS применяется через setStyleSheet на экземпляре CollapsibleSection;
 # objectName-селекторы изолируют стиль от остальных виджетов приложения.
 _HEADER_QSS = f"""
@@ -144,11 +147,19 @@ class CollapsibleSection(QWidget):
     # ------------------------------------------------------------------
 
     def _apply_state(self) -> None:
-        """Синхронизировать видимость body и символ шеврона с self._expanded."""
+        """Синхронизировать видимость body, символ шеврона и кламп высоты.
+
+        В свёрнутом виде секция ограничена высотой шапки — чтобы внутри
+        QSplitter свёрнутые секции не растягивались и не «съедали» место.
+        """
         self._body.setVisible(self._expanded)
         self._chevron.setText(
             _CHEVRON_EXPANDED if self._expanded else _CHEVRON_COLLAPSED
         )
+        if self._expanded:
+            self.setMaximumHeight(_QWIDGETSIZE_MAX)
+        else:
+            self.setMaximumHeight(HEADER_HEIGHT)
 
     def _on_header_clicked(self) -> None:
         """Обработчик клика по заголовку — переключает состояние."""

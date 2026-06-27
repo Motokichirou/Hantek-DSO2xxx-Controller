@@ -360,3 +360,13 @@ class TestPanelStructure:
 
     def test_table_has_four_columns(self, panel):
         assert panel._table.columnCount() == 4
+
+    def test_has_stats_reset_signal(self, panel):
+        assert hasattr(panel, "statsResetRequested")
+
+    def test_reset_button_emits_signal(self, panel):
+        """Клик по «Сброс ст.» эмитирует statsResetRequested."""
+        received = []
+        panel.statsResetRequested.connect(lambda: received.append(True))
+        panel._reset_btn.click()
+        assert received == [True]

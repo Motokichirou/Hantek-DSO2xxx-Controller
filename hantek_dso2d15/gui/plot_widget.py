@@ -49,6 +49,30 @@ def _time_label(s: float) -> str:
     return f"{s:.3g}s"
 
 
+def _volt_label(v: float) -> str:
+    """Подпись напряжения со знаком: '+1.2V' / '-500mV' / '+0mV'."""
+    a = abs(v)
+    if a < 1.0:
+        return f"{v * 1000:+.3g}mV"
+    return f"{v:+.3g}V"
+
+
+def _freq_label(f: float) -> str:
+    """Компактная подпись частоты: 'Hz'/'kHz'/'MHz'/'GHz'."""
+    a = abs(f)
+    if a >= 1e9:
+        return f"{f / 1e9:.3g}GHz"
+    if a >= 1e6:
+        return f"{f / 1e6:.3g}MHz"
+    if a >= 1e3:
+        return f"{f / 1e3:.3g}kHz"
+    return f"{f:.3g}Hz"
+
+
+# Символы алгебраических операций math для подписи в бейдже
+_MATH_OP_SYM = {"ADD": "+", "SUBtract": "−", "MULTiply": "×", "DIVision": "÷"}
+
+
 def _hex_to_rgb(hex_color: str) -> tuple[int, int, int]:
     h = hex_color.lstrip("#")
     return int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
@@ -97,6 +121,7 @@ class ScopePlot(QWidget):
         self._trig_vdiv: float | None = None
         self._trig_offset: float = 0.0
         self._trig_dragging: bool = False
+        self._trig_settle: int = 0   # счётчик кадров «не трогать линию» после drag
         self._trig_level_line = pg.InfiniteLine(
             angle=0, movable=True,
             pen=pg.mkPen(color=(255, 255, 255, 90), width=1, style=Qt.PenStyle.DashLine),
@@ -116,6 +141,7 @@ class ScopePlot(QWidget):
 
         # оверлей курсоров (привязка панели — в main_window)
         self.cursors = CursorOverlay(self._pi)
+        self.cursors.valuesChanged.connect(self._on_cursor_values)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -130,6 +156,9 @@ class ScopePlot(QWidget):
         )
         self._readout.move(10, 8)
         self._readout.setText("")
+        self._meas_readout = ""   # строка активных измерений (пушит main_window)
+        self._line_cursors = ""   # строка курсоров (ΔX/1ΔX/ΔY)
+        self._line_math = ""      # строка math (операция + скаляр)
 
         # бейдж статуса триггера (top-center): Stop/Auto/Trig'd/Ready
         self._trig_badge = QLabel(self._pw)
@@ -271,6 +300,7 @@ class ScopePlot(QWidget):
         cfg = self._math_config
         if not cfg or not cfg.get("display"):
             self._math_curve.setData([], [])
+            self._line_math = ""
             return
         try:
             res = compute_math(decoded, cfg)
@@ -278,6 +308,7 @@ class ScopePlot(QWidget):
             res = None
         if res is None or len(res.y) == 0:
             self._math_curve.setData([], [])
+            self._line_math = ""
             return
         L = len(res.y)
         x = np.linspace(0.0, HDIV, L)
@@ -285,11 +316,30 @@ class ScopePlot(QWidget):
             scale = float(cfg.get("scale", 1.0)) or 1.0
             off = float(cfg.get("offset", 0.0))
             self._math_curve.setData(x, (np.asarray(res.y) + off) / scale)
+            self._line_math = self._build_math_line(cfg, res)
         else:  # fft — авто-вписать спектр в графикуль (точная ось частот — дизайн-пасс)
             y = np.asarray(res.y, dtype=float)
             ymin = float(y.min())
             span = float(y.max()) - ymin or 1.0
             self._math_curve.setData(x, (y - ymin) / span * VDIV - VDIV / 2.0)
+            self._line_math = self._build_math_line(cfg, res)
+
+    @staticmethod
+    def _build_math_line(cfg: dict, res) -> str:
+        """HTML-строка math для бейджа: операция + скаляр (Vpp / пик-частота)."""
+        if res.kind == "algebraic":
+            op = _MATH_OP_SYM.get(str(cfg.get("operator", "")), "?")
+            s1, s2 = cfg.get("source1", 1), cfg.get("source2", 2)
+            y = np.asarray(res.y, dtype=float)
+            vpp = float(y.max() - y.min()) if y.size else 0.0
+            label = f"Math CH{s1}{op}CH{s2}&nbsp;&nbsp;Vpp={_volt_label(vpp)}"
+        else:  # fft
+            src = cfg.get("fft_source", 1)
+            xf = np.asarray(res.x, dtype=float)
+            yf = np.asarray(res.y, dtype=float)
+            peak = f"&nbsp;&nbsp;peak {_freq_label(float(xf[int(np.argmax(yf))]))}" if yf.size else ""
+            label = f"FFT CH{src}{peak}"
+        return f"<span style='color:{MATH_COLOR}'>{label}</span>"
 
     # ------------------------------------------------------------------
     # Кадр
@@ -344,9 +394,14 @@ class ScopePlot(QWidget):
             self._trig_level_line.setPen(pg.mkPen(color=(r, g, b, 110), width=1,
                                                   style=Qt.PenStyle.DashLine))
             if not self._trig_dragging:            # не перебивать активный drag
-                y = (float(lvl) + off) / vdiv      # уровень в делениях
-                self._trig_level_line.setValue(y)
-                self._place_trig_arrow(y, (r, g, b))
+                if self._trig_settle > 0:
+                    # после отпускания держим позицию, пока прибор не догонит
+                    # (иначе старые кадры дёргают линию назад — «bounce»)
+                    self._trig_settle -= 1
+                else:
+                    y = (float(lvl) + off) / vdiv  # уровень в делениях
+                    self._trig_level_line.setValue(y)
+                    self._place_trig_arrow(y, (r, g, b))
             self._trig_level_line.show()
             self._trig_level_arrow.show()
             self._trig_pos_arrow.setPos(HDIV / 2.0, VDIV / 2.0)  # позиция по центру (по X)
@@ -377,6 +432,7 @@ class ScopePlot(QWidget):
         if self._trig_vdiv:
             y = self._trig_level_line.value()
             volts = y * self._trig_vdiv - self._trig_offset
+            self._trig_settle = 4   # держать позицию, пока прибор догонит (без bounce)
             self.triggerLevelChanged.emit(float(volts))
 
     @staticmethod
@@ -394,28 +450,115 @@ class ScopePlot(QWidget):
             srate=decoded.srate,
             triggered=decoded.triggered,
             timebase=getattr(decoded, "timebase", None),
+            trigger_level=getattr(decoded, "trigger_level", None),
+            trigger_source=getattr(decoded, "trigger_source", None),
         )
 
-    def _update_readout(self, decoded) -> None:
-        """Бейджи: время/дел + V/дел по каналам (в цвете) + срейт + статус триггера."""
+    def _on_cursor_values(self, values: dict) -> None:
+        """Курсоры изменились → собрать строку бейджа (ΔX · 1/ΔX · ΔY)."""
+        if not values or values.get("mode", "OFF") == "OFF":
+            self._line_cursors = ""
+            self._render_readout()
+            return
         parts = []
-        # время/дел = реально показанное окно / 14 делений (в зум-окне == s/дел прибора)
-        n_shown = len(decoded.time)
-        sr0 = decoded.srate
-        if n_shown > 1 and sr0 > 0:
-            tdiv = (n_shown / sr0) / HDIV
-            parts.append(f"<span style='color:#C5C9D1'>{_time_label(tdiv)}/дел</span>")
+        dt = values.get("dt")
+        if dt is not None:
+            parts.append(f"ΔX={_time_label(dt)}")
+            freq = values.get("freq")
+            if freq is not None:
+                parts.append(f"1/ΔX={_freq_label(freq)}")
+        dv = values.get("dv")
+        if dv is not None:
+            parts.append(f"ΔY={_volt_label(dv)}")
+        if parts:
+            inner = "&nbsp;&nbsp;".join(parts)
+            self._line_cursors = f"<span style='color:{CURSOR}'>Curs {inner}</span>"
+        else:
+            self._line_cursors = ""
+        self._render_readout()
+
+    def set_measurements_readout(self, html: str) -> None:
+        """Принять готовую HTML-строку активных измерений (пушит main_window).
+
+        Пустая строка убирает строку измерений из бейджа. Перерисовки кадра не
+        требуется — текст обновится при следующем ``update_frame``; но для
+        мгновенного отклика дёргаем перерисовку самого лейбла.
+        """
+        self._meas_readout = html or ""
+        self._render_readout()
+
+    def _update_readout(self, decoded) -> None:
+        """Собрать строки бейджа из кадра и перерисовать.
+
+        Строка 1 — каналы: ``CHn V/дел ⎓смещение`` (в цвете канала).
+        Строка 2 — триггер: ``Trig CHn уровень`` (в цвете источника).
+        Строка 3 — развёртка · срейт · статус.
+        Строка 4 — активные измерения (``self._meas_readout``, если задана).
+        """
+        # --- строка 1: каналы (V/дел + смещение) ---
+        ch_parts = []
         for n in sorted(decoded.channels):
             color = CH_COLORS.get(n, "#C5C9D1")
             vdiv = decoded.scales.get(n)
-            if vdiv:
-                parts.append(f"<span style='color:{color}'>CH{n} {_vdiv_label(vdiv)}</span>")
+            if not vdiv:
+                continue
+            off = decoded.offsets.get(n, 0.0)
+            off_txt = f" <span style='color:#7A808C'>⎓{_volt_label(off)}</span>" if off else ""
+            ch_parts.append(
+                f"<span style='color:{color}'>CH{n} {_vdiv_label(vdiv)}</span>{off_txt}"
+            )
+        self._line_channels = "&nbsp;&nbsp;".join(ch_parts)
+
+        # --- строка 2: уровень триггера (цвет источника) ---
+        src = getattr(decoded, "trigger_source", None)
+        lvl = getattr(decoded, "trigger_level", None)
+        if src is not None and lvl is not None:
+            tcolor = CH_COLORS.get(src, "#C5C9D1")
+            self._line_trigger = (
+                f"<span style='color:{tcolor}'>Trig CH{src} {_volt_label(float(lvl))}</span>"
+            )
+        else:
+            self._line_trigger = ""
+
+        # --- строка 3: время/дел · срейт · статус ---
+        tb_parts = []
+        n_shown = len(decoded.time)
         sr = decoded.srate
-        sr_txt = f"{sr/1e9:g} GSa/s" if sr >= 1e9 else (f"{sr/1e6:g} MSa/s" if sr >= 1e6 else f"{sr/1e3:g} kSa/s")
+        if n_shown > 1 and sr > 0:
+            tdiv = (n_shown / sr) / HDIV
+            tb_parts.append(f"<span style='color:#C5C9D1'>{_time_label(tdiv)}/дел</span>")
+        if sr > 0:
+            sr_txt = (f"{sr/1e9:g} GSa/s" if sr >= 1e9
+                      else (f"{sr/1e6:g} MSa/s" if sr >= 1e6 else f"{sr/1e3:g} kSa/s"))
+            tb_parts.append(f"<span style='color:#9AA0AC'>{sr_txt}</span>")
         trig = "Trig'd" if decoded.triggered else "Auto"
-        parts.append(f"<span style='color:#9AA0AC'>{sr_txt}</span>")
-        parts.append(f"<span style='color:{'#37D67A' if decoded.triggered else '#F5A623'}'>{trig}</span>")
-        self._readout.setText("&nbsp;&nbsp;".join(parts))
+        tcol = "#37D67A" if decoded.triggered else "#F5A623"
+        tb_parts.append(f"<span style='color:{tcol}'>{trig}</span>")
+        self._line_timebase = "&nbsp;·&nbsp;".join(tb_parts)
+
+        self._render_readout()
+
+    def _render_readout(self) -> None:
+        """Склеить непустые строки бейджа и обновить лейбл.
+
+        Дедуп: ``setText``/``adjustSize`` (релейаут rich-text, дорого) только при
+        реальном изменении содержимого. Бейдж зовётся каждый кадр, но строки
+        каналов/развёртки/таблицы между кадрами обычно совпадают — лишний релейаут
+        под нагрузкой режет FPS.
+        """
+        lines = [
+            getattr(self, "_line_channels", ""),
+            getattr(self, "_line_trigger", ""),
+            getattr(self, "_line_timebase", ""),
+            getattr(self, "_line_math", ""),
+            getattr(self, "_line_cursors", ""),
+            self._meas_readout,
+        ]
+        html = "<br>".join(s for s in lines if s)
+        if html == getattr(self, "_readout_html_cache", None):
+            return
+        self._readout_html_cache = html
+        self._readout.setText(html)
         self._readout.adjustSize()
 
     def clear(self) -> None:

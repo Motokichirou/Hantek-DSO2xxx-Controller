@@ -137,6 +137,8 @@ class MeasurePanel(QWidget):
     """
 
     measurementsChanged = Signal(object)
+    #: пользователь нажал «Сброс статистики» — обнулить накопленные cur/avg/max/min/count.
+    statsResetRequested = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -166,6 +168,11 @@ class MeasurePanel(QWidget):
         self._add_btn = QPushButton("+ Добавить измерение")
         self._add_btn.clicked.connect(self._show_add_menu)
         header.addWidget(self._add_btn, stretch=1)
+
+        self._reset_btn = QPushButton("Сброс ст.")
+        self._reset_btn.setToolTip("Сбросить накопленную статистику (cur/avg/max/min/count)")
+        self._reset_btn.clicked.connect(self.statsResetRequested)
+        header.addWidget(self._reset_btn)
 
         lay.addLayout(header)
 

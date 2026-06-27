@@ -42,3 +42,6 @@ scpi_*.log
 /waveform.h5
 /scope.png
 /preset.json
+
+# Машинно-зависимый ярлык запуска (абсолютные пути)
+*.lnk

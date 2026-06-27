@@ -12,7 +12,7 @@ from datetime import datetime
 from PySide6.QtCore import Qt, QThread, QMetaObject, QElapsedTimer, Slot, Signal
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QToolBar, QComboBox, QPushButton, QLabel, QSizePolicy,
-    QDockWidget, QTabWidget, QScrollArea, QVBoxLayout, QFileDialog, QMenu,
+    QDockWidget, QTabWidget, QScrollArea, QVBoxLayout, QFileDialog, QMenu, QSplitter,
 )
 
 from hantek_dso2d15.transport.visa_transport import VisaTransport
@@ -37,7 +37,14 @@ from hantek_dso2d15.gui.panels.generator import GeneratorPanel
 from hantek_dso2d15.gui.panels.sweep import SweepPanel
 from hantek_dso2d15.gui.scpi_terminal import ScpiTerminal
 from hantek_dso2d15.gui.accordion import CollapsibleSection
+from hantek_dso2d15.measure_stats import MeasurementStats
 from hantek_dso2d15.gui.theme import STYLESHEET
+
+
+def _html_escape(s: str) -> str:
+    """Экранировать спецсимволы HTML (пробелы сохраняет <pre>)."""
+    return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
 
 class MainWindow(QMainWindow):
     # запросы пресета в поток воркера (Qt маршалит str/dict)
@@ -151,6 +158,7 @@ class MainWindow(QMainWindow):
         self._trigger = TriggerPanel()
         self._acquire = AcquirePanel()
         self._measure = MeasurePanel()
+        self._meas_stats = MeasurementStats()   # клиентская статистика измерений
         self._math = MathPanel()
         self._cursors = CursorsPanel()
         self._display = DisplayPanel()
@@ -166,11 +174,13 @@ class MainWindow(QMainWindow):
         # прибором — проводка в __init__ (ниже), активны всегда.
         self._client_panels = [self._math, self._cursors, self._display]
 
-        scope_body = QWidget()
-        sl = QVBoxLayout(scope_body)
-        sl.setContentsMargins(0, 0, 0, 0)
-        sl.setSpacing(0)
-        # аккордеон: по умолчанию развёрнуты Вертикаль/Горизонталь/Триггер/Измерения
+        # аккордеон в вертикальном сплиттере: разделители между секциями можно
+        # тянуть мышью, перераспределяя высоту (напр. увеличить таблицу измерений).
+        scope_body = QSplitter(Qt.Vertical)
+        scope_body.setObjectName("ScopeAccordion")
+        scope_body.setChildrenCollapsible(False)
+        scope_body.setHandleWidth(3)
+        # по умолчанию развёрнуты Вертикаль/Горизонталь/Триггер/Измерения
         for title, panel, expanded in (
                 ("ВЕРТИКАЛЬ", self._vertical, True), ("ГОРИЗОНТАЛЬ", self._horizontal, True),
                 ("ТРИГГЕР", self._trigger, True), ("ИЗМЕРЕНИЯ", self._measure, True),
@@ -178,8 +188,7 @@ class MainWindow(QMainWindow):
                 ("КУРСОРЫ", self._cursors, False), ("ДИСПЛЕЙ", self._display, False)):
             if panel in self._panels or panel is self._measure:
                 panel.setEnabled(False)  # device-панели включаются при connect
-            sl.addWidget(CollapsibleSection(title, panel, expanded=expanded))
-        sl.addStretch(1)
+            scope_body.addWidget(CollapsibleSection(title, panel, expanded=expanded))
 
         # --- проводка клиентских панелей к графику (без прибора) ---
         self._display.displayChanged.connect(
@@ -264,11 +273,29 @@ class MainWindow(QMainWindow):
         else:
             self._disconnect()
 
+    def _set_connecting_ui(self, busy: bool) -> None:
+        """Лёгкая обратная связь на коннекте: открытие VISA блокирует UI-поток на
+        3-5 с (анимация невозможна без потоков), поэтому хотя бы сразу показываем
+        статус и принудительно перерисовываем кнопку/лейбл до фриза.
+        """
+        if busy:
+            self._btn_connect.setEnabled(False)
+            self._btn_connect.setText("⏳ Подключение…")
+            self._lbl_conn.setText("● connecting…")
+            self._lbl_conn.setStyleSheet("color: #F5A623;")
+            # принудительная немедленная перерисовка (до блокирующего VISA-вызова)
+            self._btn_connect.repaint()
+            self._lbl_conn.repaint()
+        else:
+            self._btn_connect.setEnabled(True)
+            self._btn_connect.setText("Connect")
+
     def _connect(self):
         resource = self._resources.currentText().strip()
         if not resource:
             self._lbl_idn.setText("Нет VISA-ресурса. Подключи прибор и нажми ⟳.")
             return
+        self._set_connecting_ui(True)
         try:
             self._transport = VisaTransport(resource, timeout_ms=8000)
             if self._scpi_log.is_active:
@@ -287,16 +314,22 @@ class MainWindow(QMainWindow):
             self._measure.load_from_scope(self._scope)
         except Exception as exc:  # noqa: BLE001
             self._lbl_idn.setText(f"Ошибка подключения: {exc}")
+            self._lbl_conn.setText("● offline")
+            self._lbl_conn.setStyleSheet("color: #5A606C;")
             self._scope = None
+            self._set_connecting_ui(False)
             return
 
         # worker в фоновом потоке
-        self._worker = EngineWorker(self._controller, interval_ms=5)
+        # 50 мс (≈20 Гц): даёт USB-потоку osc передышку между кадрами. 5 мс (200 Гц)
+        # провоцировал десинк USBTMC → «кадр не собран за 512 пакетов».
+        self._worker = EngineWorker(self._controller, interval_ms=50)
         self._thread = QThread(self)
         self._worker.moveToThread(self._thread)
         self._worker.frameReady.connect(self._on_frame)
         self._worker.errorOccurred.connect(self._on_error)
         self._worker.stateChanged.connect(self._on_state)
+        self._worker.diagTiming.connect(self._on_diag_timing)
         # контролы панелей → слот воркера в его потоке (Qt маршалит payload)
         for panel in self._panels:
             panel.settingChanged.connect(
@@ -309,6 +342,8 @@ class MainWindow(QMainWindow):
             self._worker.set_measurements, Qt.ConnectionType.QueuedConnection
         )
         self._worker.measurementsReady.connect(self._measure.update_values)
+        self._worker.measurementsReady.connect(self._on_measurements_badge)
+        self._measure.statsResetRequested.connect(self._reset_meas_stats)
         # Sweep: старт → worker.run_sweep (в его потоке); стоп → отмена (Event,
         # потокобезопасно, проходит даже пока run_sweep блокирует поток воркера).
         self._sweep.startRequested.connect(
@@ -341,6 +376,7 @@ class MainWindow(QMainWindow):
         self._worker.commandResult.connect(self._on_command_result)
         self._thread.start()
 
+        self._btn_connect.setEnabled(True)   # снять busy-disable коннекта
         self._btn_connect.setText("Disconnect")
         self._btn_run.setEnabled(True)
         self._btn_single.setEnabled(True)
@@ -405,11 +441,13 @@ class MainWindow(QMainWindow):
         else:
             self._frame_count = 0
             self._fps_timer.restart()
+            self._reset_meas_stats()   # новый прогон Run → статистика с нуля
             QMetaObject.invokeMethod(self._worker, "start", Qt.ConnectionType.QueuedConnection)
 
     def _single(self):
         if self._worker is None:
             return
+        self._reset_meas_stats()       # Single → статистика с нуля
         QMetaObject.invokeMethod(self._worker, "single", Qt.ConnectionType.QueuedConnection)
 
     def _toggle_log(self, on: bool):
@@ -440,6 +478,100 @@ class MainWindow(QMainWindow):
         """Уровень триггера перетащили на графике → в прибор + синхронизировать панель."""
         self._sigApplySetting.emit("trigger.edge.level", float(volts))
         self._trigger.update_level(float(volts))
+
+    def _on_measurements_badge(self, payload):
+        """Накопить статистику измерений и показать таблицу в бейдже графика.
+
+        Прибор отдаёт только текущее значение; cur/avg/max/min/std/count копим у
+        себя (``self._meas_stats``). Строим компактную HTML-таблицу по активному
+        набору (порядок payload) и пушим в бейдж. Пустой набор — очищает таблицу.
+        """
+        self._meas_stats.update(payload)
+        self._plot.set_measurements_readout(self._build_stats_table(payload))
+
+    # Жёсткая таблица статистики: моноширинные колонки фиксированной ширины
+    # (значения не «прыгают» при смене длины). Ширины в символах.
+    _STATS_W_LABEL = 13     # столбец «CHn ITEM»
+    _STATS_W_NUM = 11       # числовые столбцы (cur/avg/max/min/std/rms)
+    _STATS_W_CNT = 6        # счётчик
+
+    @staticmethod
+    def _pad(text: str, width: int, *, right: bool) -> str:
+        """Обрезать до width и выровнять моноширинно, ГАРАНТИРУЯ ≥1 пробел-разделитель.
+
+        Содержимое ограничено ``width-1`` символами — поэтому при выравнивании всегда
+        остаётся минимум один пробел (иначе соседние колонки слипаются).
+        """
+        s = str(text)
+        maxc = max(1, width - 1)          # резерв ≥1 символа под разделитель
+        if len(s) > maxc:
+            s = s[: max(0, maxc - 1)] + "…"
+        return s.rjust(width) if right else s.ljust(width)
+
+    def _build_stats_table(self, payload) -> str:
+        """Жёсткая моноширинная таблица статистики измерений (строки = активный набор).
+
+        Колонки фиксированной ширины через ``<pre>``: Изм · Cur · Avg · Max · Min ·
+        Std · RMS · Cnt. Строки окрашены по каналу; шапка серая.
+        """
+        from hantek_dso2d15.gui.panels.measure import _fmt_value
+        from hantek_dso2d15.gui.theme import CH_COLORS
+
+        wl, wn, wc = self._STATS_W_LABEL, self._STATS_W_NUM, self._STATS_W_CNT
+
+        def _num(val, item):
+            try:
+                return _fmt_value(item, float(val))
+            except (TypeError, ValueError):
+                return "—"
+
+        lines = []
+        seen = set()
+        for entry in payload or []:
+            try:
+                ch = int(entry["channel"])
+                item = str(entry["item"])
+            except (KeyError, TypeError, ValueError):
+                continue
+            key = (ch, item)
+            if key in seen:
+                continue
+            seen.add(key)
+            s = self._meas_stats.stats_for(ch, item)
+            if s is None:
+                continue
+            color = CH_COLORS.get(ch, "#C5C9D1")
+            row = (
+                self._pad(f"CH{ch} {item}", wl, right=False)
+                + self._pad(_num(s["cur"], item), wn, right=True)
+                + self._pad(_num(s["avg"], item), wn, right=True)
+                + self._pad(_num(s["max"], item), wn, right=True)
+                + self._pad(_num(s["min"], item), wn, right=True)
+                + self._pad(_num(s["std"], item), wn, right=True)
+                + self._pad(_num(s["rms"], item), wn, right=True)
+                + self._pad(str(s["count"]), wc, right=True)
+            )
+            lines.append(f"<span style='color:{color}'>{_html_escape(row)}</span>")
+        if not lines:
+            return ""
+        header = (
+            self._pad("Изм", wl, right=False)
+            + self._pad("Cur", wn, right=True)
+            + self._pad("Avg", wn, right=True)
+            + self._pad("Max", wn, right=True)
+            + self._pad("Min", wn, right=True)
+            + self._pad("Std", wn, right=True)
+            + self._pad("RMS", wn, right=True)
+            + self._pad("Cnt", wc, right=True)
+        )
+        head_span = f"<span style='color:#7A808C'>{_html_escape(header)}</span>"
+        body = "\n".join([head_span] + lines)
+        return f"<pre style='margin:0;font-family:JetBrains Mono,Consolas,monospace'>{body}</pre>"
+
+    def _reset_meas_stats(self):
+        """Сбросить накопленную статистику измерений и очистить таблицу бейджа."""
+        self._meas_stats.reset()
+        self._plot.set_measurements_readout("")
 
     def _pick_sweep_folder(self):
         """Открыть диалог выбора папки для свипа (главный поток)."""
@@ -556,18 +688,35 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------
 
     @Slot(object)
+    def _on_diag_timing(self, read_ms: float, meas_ms: float, packets: int) -> None:
+        """Диагностика кадра: мс чтения · мс измерений · число USB-пакетов."""
+        self._diag_read_ms = float(read_ms)
+        self._diag_meas_ms = float(meas_ms)
+        self._diag_packets = int(packets)
+
     def _on_frame(self, decoded):
         self._plot.update_frame(decoded)
         self._last_frame = decoded
+        # FPS по скользящему окну ~1 с (истинная текущая скорость, а не среднее с
+        # момента старта — иначе медленный разгон занижает цифру надолго).
         self._frame_count += 1
-        fps = ""
         if self._fps_timer.isValid():
-            el = self._fps_timer.elapsed() / 1000.0
-            if el > 0:
-                fps = f" · {self._frame_count / el:.1f} fps"
+            el = self._fps_timer.elapsed()
+            if el >= 1000:
+                self._fps_display = self._frame_count * 1000.0 / el
+                self._frame_count = 0
+                self._fps_timer.restart()
+        fps_val = getattr(self, "_fps_display", 0.0)
+        fps = f" · {fps_val:.1f} fps" if fps_val else ""
         trig = "Trig'd" if decoded.triggered else "Auto"
+        diag = ""
+        rd = getattr(self, "_diag_read_ms", None)
+        if rd is not None:
+            ms = getattr(self, "_diag_meas_ms", 0.0)
+            pk = getattr(self, "_diag_packets", 0)
+            diag = f" · rd {rd:.0f}ms/{pk}pk · ms {ms:.0f}ms"
         self._lbl_metrics.setText(
-            f"{decoded.srate/1e6:.3f} MSa/s · {trig} · {len(decoded.channels)} ch{fps}"
+            f"{decoded.srate/1e6:.3f} MSa/s · {trig} · {len(decoded.channels)} ch{fps}{diag}"
         )
 
     @Slot(str)

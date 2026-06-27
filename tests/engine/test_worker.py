@@ -5,6 +5,8 @@ QCoreApplication is created once at module scope.
 """
 from __future__ import annotations
 
+import time
+
 import pytest
 from PySide6.QtCore import QCoreApplication
 
@@ -478,6 +480,148 @@ def test_measurements_not_called_when_frame_fails(qapp):
     assert "frame error" in errors[0], "errorOccurred должен нести текст ошибки кадра"
     assert payloads == [], "measurementsReady не должен эмититься при ошибке кадра"
     assert c.measurement_calls == [], "read_measurements не должен вызываться при ошибке кадра"
+
+
+# ---------------------------------------------------------------------------
+# Измерения: round-robin порциями + кэш + каденция опроса (_measure_poll_period)
+# ---------------------------------------------------------------------------
+
+def test_poll_gated_by_period(qapp):
+    """Подряд несколько capture_once в пределах периода → опрос (и эмиссия) один раз.
+
+    Между опросами кадры идут свободно (без measure-I/O) — дисплей не тормозится.
+    """
+    c = _ControllerWithMeasure()
+    worker = EngineWorker(c)
+    worker.set_measurements([(1, "FREQ")])
+    worker._measure_poll_period = 1000.0  # огромный период → опрос только первый кадр
+
+    payloads = []
+    worker.measurementsReady.connect(payloads.append)
+
+    worker.capture_once()
+    worker.capture_once()
+    worker.capture_once()
+
+    assert len(payloads) == 1, "в пределах периода опрос один раз"
+    assert len(c.measurement_calls) == 1, "между опросами measure-I/O не выполняется"
+
+
+def test_first_capture_polls(qapp):
+    """Первый capture_once после старта опрашивает измерения независимо от периода."""
+    c = _ControllerWithMeasure()
+    worker = EngineWorker(c)
+    worker.set_measurements([(1, "FREQ")])
+    worker._measure_poll_period = 1000.0
+
+    payloads = []
+    worker.measurementsReady.connect(payloads.append)
+    worker.capture_once()
+
+    assert len(payloads) == 1, "первый кадр (last_poll_t is None) опрашивает всегда"
+
+
+def test_round_robin_polls_subset_per_poll(qapp):
+    """За один опрос берётся только _measure_batch измерений (round-robin)."""
+    c = _ControllerWithMeasure()
+    worker = EngineWorker(c)
+    worker.set_measurements([(1, "A"), (1, "B"), (1, "C"), (1, "D")])
+    worker._measure_batch = 2
+    worker._measure_poll_period = 0.0  # каждый кадр опрашивает (для теста)
+
+    worker.capture_once()
+    assert len(c.measurement_calls) == 1
+    assert len(c.measurement_calls[0]) == 2, "round-robin: ровно _measure_batch за опрос"
+
+
+def test_snapshot_includes_all_requests(qapp):
+    """Снимок в UI содержит ВЕСЬ набор; ещё не опрошенные → value None."""
+    c = _ControllerWithMeasure()
+    worker = EngineWorker(c)
+    worker.set_measurements([(1, "A"), (1, "B"), (1, "C"), (1, "D")])
+    worker._measure_batch = 2
+
+    payloads = []
+    worker.measurementsReady.connect(payloads.append)
+    worker.capture_once()
+
+    snap = payloads[0]
+    assert len(snap) == 4, "снимок включает все 4 запроса"
+    valued = [d for d in snap if d["value"] is not None]
+    assert len(valued) == 2, "опрошены только 2 (batch), остальные пока None"
+
+
+def test_round_robin_advances(qapp):
+    """Следующий опрос берёт СЛЕДУЮЩУЮ порцию (указатель сдвигается)."""
+    c = _ControllerWithMeasure()
+    worker = EngineWorker(c)
+    worker.set_measurements([(1, "A"), (1, "B"), (1, "C"), (1, "D")])
+    worker._measure_batch = 2
+    worker._measure_poll_period = 0.0  # каждый кадр опрашивает (для теста)
+
+    worker.capture_once()
+    worker.capture_once()
+    first = {(ch, it) for ch, it in c.measurement_calls[0]}
+    second = {(ch, it) for ch, it in c.measurement_calls[1]}
+    assert first == {(1, "A"), (1, "B")}
+    assert second == {(1, "C"), (1, "D")}, "round-robin сдвигается на следующую порцию"
+
+
+def test_single_polls_full_set(qapp):
+    """single() меряет ВЕСЬ набор за один захват (а не порцию)."""
+    c = _ControllerWithMeasure()
+    worker = EngineWorker(c)
+    worker.set_measurements([(1, "A"), (1, "B"), (1, "C"), (1, "D")])
+    worker._measure_batch = 2
+
+    payloads = []
+    worker.measurementsReady.connect(payloads.append)
+    worker.single()
+
+    assert len(c.measurement_calls[-1]) == 4, "single опрашивает все измерения сразу"
+    valued = [d for d in payloads[-1] if d["value"] is not None]
+    assert len(valued) == 4, "снимок после single — все значения заполнены"
+
+
+def test_set_measurements_resets_cache(qapp):
+    """Смена набора измерений сбрасывает кэш и round-robin."""
+    c = _ControllerWithMeasure()
+    worker = EngineWorker(c)
+    worker.set_measurements([(1, "A"), (1, "B")])
+    worker.capture_once()
+    assert worker._measure_cache, "кэш заполнен после опроса"
+
+    worker.set_measurements([(2, "X")])
+    assert worker._measure_cache == {}, "новый набор обнуляет кэш"
+    assert worker._measure_rr == 0
+
+
+def test_start_resets_poll_cadence(qapp):
+    """start() обнуляет каденцию, чтобы первый кадр прогона сразу опросил измерения."""
+    c = _ControllerWithMeasure()
+    worker = EngineWorker(c)
+    worker.set_measurements([(1, "FREQ")])
+    worker._last_poll_t = time.monotonic()  # как будто только что опрашивали
+
+    worker.start()
+    assert worker._last_poll_t is None, "start() обнуляет каденцию опроса измерений"
+    worker.stop()
+
+
+def test_diag_timing_emitted(qapp):
+    """diagTiming эмитится каждый кадр (мс чтения, мс измерений, число пакетов)."""
+    c = _ControllerWithMeasure()
+    worker = EngineWorker(c)
+    worker.set_measurements([(1, "FREQ")])
+
+    timings = []
+    worker.diagTiming.connect(lambda r, m, p: timings.append((r, m, p)))
+    worker.capture_once()
+
+    assert len(timings) == 1
+    read_ms, meas_ms, packets = timings[0]
+    assert read_ms >= 0.0 and meas_ms >= 0.0
+    assert isinstance(packets, int)
 
 
 # ---------------------------------------------------------------------------

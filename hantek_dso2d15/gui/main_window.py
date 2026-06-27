@@ -31,7 +31,18 @@ QComboBox { background: #0E0F12; border: 1px solid #2A2D34; border-radius: 5px;
             padding: 4px 8px; color: #E6E9EF; }
 QComboBox#resources { min-width: 320px; }
 QDoubleSpinBox { background: #0E0F12; border: 1px solid #2A2D34; border-radius: 4px;
-                 padding: 3px 6px; color: #E6E9EF; }
+                 padding: 3px 18px 3px 6px; color: #E6E9EF; }
+QDoubleSpinBox::up-button { subcontrol-origin: border; subcontrol-position: top right;
+                 width: 16px; border-left: 1px solid #2A2D34; background: #1B1E24;
+                 border-top-right-radius: 4px; }
+QDoubleSpinBox::down-button { subcontrol-origin: border; subcontrol-position: bottom right;
+                 width: 16px; border-left: 1px solid #2A2D34; background: #1B1E24;
+                 border-bottom-right-radius: 4px; }
+QDoubleSpinBox::up-button:hover, QDoubleSpinBox::down-button:hover { background: #2A2D34; }
+QDoubleSpinBox::up-arrow { width: 0; height: 0; border-left: 4px solid transparent;
+                 border-right: 4px solid transparent; border-bottom: 5px solid #9AA0AC; }
+QDoubleSpinBox::down-arrow { width: 0; height: 0; border-left: 4px solid transparent;
+                 border-right: 4px solid transparent; border-top: 5px solid #9AA0AC; }
 QCheckBox { color: #9AA0AC; }
 QPushButton { background: #1B1E24; border: 1px solid #2A2D34; border-radius: 5px;
               padding: 6px 14px; color: #C5C9D1; font-weight: 600; }

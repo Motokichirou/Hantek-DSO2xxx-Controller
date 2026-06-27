@@ -35,6 +35,7 @@ from hantek_dso2d15.gui.panels.cursors import CursorsPanel
 from hantek_dso2d15.gui.panels.display import DisplayPanel
 from hantek_dso2d15.gui.panels.generator import GeneratorPanel
 from hantek_dso2d15.gui.panels.sweep import SweepPanel
+from hantek_dso2d15.gui.scpi_terminal import ScpiTerminal
 
 STYLE = """
 QMainWindow, QWidget { background: #0E0F12; color: #C5C9D1; }
@@ -63,6 +64,7 @@ QPushButton#run { background: rgba(55,214,122,0.16); border-color: #2F4A3C; colo
 QPushButton#stop { background: rgba(229,72,77,0.16); border-color: #5A2A2C; color: #E5484D; }
 QPushButton#single { color: #F5A623; border-color: #6A521E; }
 QPushButton#log:checked { background: rgba(229,72,77,0.20); border-color: #5A2A2C; color: #E5484D; }
+QPushButton#scpi:checked { background: rgba(55,214,122,0.16); border-color: #2F4A3C; color: #37D67A; }
 QPushButton:disabled { color: #5A606C; }
 QStatusBar { background: #16181D; color: #6E747F; }
 QLabel { color: #9AA0AC; }
@@ -162,6 +164,13 @@ class MainWindow(QMainWindow):
         self._btn_preset.setEnabled(False)
         tb.addWidget(self._btn_preset)
 
+        self._btn_scpi = QPushButton("SCPI")
+        self._btn_scpi.setObjectName("scpi")
+        self._btn_scpi.setCheckable(True)
+        self._btn_scpi.setToolTip("Показать/скрыть SCPI-терминал")
+        self._btn_scpi.toggled.connect(self._toggle_terminal)
+        tb.addWidget(self._btn_scpi)
+
         # --- правый док: табы Scope / Generator / Sweep ---
         self._dock = QDockWidget("", self)
         self._dock.setFeatures(QDockWidget.NoDockWidgetFeatures)
@@ -245,6 +254,19 @@ class MainWindow(QMainWindow):
 
         self._dock.setWidget(self._tabs)
         self.addDockWidget(Qt.RightDockWidgetArea, self._dock)
+
+        # --- нижний док: SCPI-терминал (скрыт; тумблер — кнопка SCPI) ---
+        self._terminal = ScpiTerminal()
+        self._terminal.setEnabled(False)  # активен при connect
+        self._term_dock = QDockWidget("SCPI-терминал", self)
+        self._term_dock.setFeatures(
+            QDockWidget.DockWidgetClosable | QDockWidget.DockWidgetMovable
+        )
+        self._term_dock.setWidget(self._terminal)
+        self.addDockWidget(Qt.BottomDockWidgetArea, self._term_dock)
+        self._term_dock.hide()
+        # синхронизировать кнопку-тумблер с видимостью дока (напр. закрытие крестиком)
+        self._term_dock.visibilityChanged.connect(self._btn_scpi.setChecked)
 
         # --- статус-бар ---
         self._lbl_conn = QLabel("● offline")
@@ -344,6 +366,11 @@ class MainWindow(QMainWindow):
         self._worker.presetSaved.connect(self._on_preset_saved)
         self._worker.presetApplied.connect(self._on_preset_applied)
         self._worker.presetError.connect(self._on_sweep_error)
+        # SCPI-терминал: команда → воркер; результат → журнал терминала
+        self._terminal.commandEntered.connect(
+            self._worker.send_command, Qt.ConnectionType.QueuedConnection
+        )
+        self._worker.commandResult.connect(self._on_command_result)
         self._thread.start()
 
         self._btn_connect.setText("Disconnect")
@@ -355,6 +382,7 @@ class MainWindow(QMainWindow):
         self._sweep.setEnabled(True)
         self._btn_save.setEnabled(True)
         self._btn_preset.setEnabled(True)
+        self._terminal.setEnabled(True)
         self._lbl_conn.setText("● connected")
         self._lbl_conn.setStyleSheet("color: #37D67A;")
         self._lbl_idn.setText(idn)
@@ -384,6 +412,7 @@ class MainWindow(QMainWindow):
         self._sweep.setEnabled(False)
         self._btn_save.setEnabled(False)
         self._btn_preset.setEnabled(False)
+        self._terminal.setEnabled(False)
         self._last_frame = None
         self._btn_connect.setText("Connect")
         self._btn_run.setText("▶ RUN")
@@ -429,6 +458,14 @@ class MainWindow(QMainWindow):
                 self._transport.set_io_logger(None)
             self._scpi_log.stop()
             self._lbl_metrics.setText("SCPI-лог остановлен")
+
+    def _toggle_terminal(self, on: bool):
+        """Показать/скрыть нижний SCPI-терминал."""
+        self._term_dock.setVisible(on)
+
+    @Slot(str, str, bool)
+    def _on_command_result(self, cmd, response, is_error):
+        self._terminal.append_response(response, is_error)
 
     def _pick_sweep_folder(self):
         """Открыть диалог выбора папки для свипа (главный поток)."""

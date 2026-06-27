@@ -89,6 +89,11 @@ class Scope:
         self.measure = Measure(transport)
         self.dds = DDS(transport)
 
+    @property
+    def transport(self):
+        """Транспорт прибора (для сырых SCPI-команд из терминала)."""
+        return self._transport
+
     # ------------------------------------------------------------------
     # Lifecycle
     # ------------------------------------------------------------------

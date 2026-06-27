@@ -478,3 +478,75 @@ def test_measurements_not_called_when_frame_fails(qapp):
     assert "frame error" in errors[0], "errorOccurred должен нести текст ошибки кадра"
     assert payloads == [], "measurementsReady не должен эмититься при ошибке кадра"
     assert c.measurement_calls == [], "read_measurements не должен вызываться при ошибке кадра"
+
+
+# ---------------------------------------------------------------------------
+# send_command — сырой SCPI из терминала
+# ---------------------------------------------------------------------------
+
+class _FakeTransportT:
+    def __init__(self, response="RESP"):
+        self.writes = []
+        self.queries = []
+        self._response = response
+        self.fail = False
+
+    def write(self, cmd):
+        if self.fail:
+            raise RuntimeError("io fail")
+        self.writes.append(cmd)
+
+    def query(self, cmd):
+        if self.fail:
+            raise RuntimeError("io fail")
+        self.queries.append(cmd)
+        return self._response
+
+
+class _ScopeT:
+    def __init__(self, transport):
+        self.transport = transport
+
+
+class _ControllerT:
+    def __init__(self, transport):
+        self.scope = _ScopeT(transport)
+
+
+def _make_cmd_worker(response="RESP"):
+    t = _FakeTransportT(response)
+    return EngineWorker(_ControllerT(t)), t
+
+
+def test_send_command_query(qapp):
+    """Команда с '?' идёт через query; результат — (cmd, ответ, False)."""
+    worker, t = _make_cmd_worker("undefined,DSO2D15")
+    results = []
+    worker.commandResult.connect(lambda c, r, e: results.append((c, r, e)))
+    worker.send_command("*IDN?")
+    assert t.queries == ["*IDN?"]
+    assert t.writes == []
+    assert results == [("*IDN?", "undefined,DSO2D15", False)]
+
+
+def test_send_command_write_returns_ok(qapp):
+    """Команда без '?' идёт через write; ответ 'OK'."""
+    worker, t = _make_cmd_worker()
+    results = []
+    worker.commandResult.connect(lambda c, r, e: results.append((c, r, e)))
+    worker.send_command(":DDS:SWITch ON")
+    assert t.writes == [":DDS:SWITch ON"]
+    assert t.queries == []
+    assert results == [(":DDS:SWITch ON", "OK", False)]
+
+
+def test_send_command_error_flagged(qapp):
+    """Исключение транспорта -> commandResult с is_error=True."""
+    worker, t = _make_cmd_worker()
+    t.fail = True
+    results = []
+    worker.commandResult.connect(lambda c, r, e: results.append((c, r, e)))
+    worker.send_command("*IDN?")
+    assert len(results) == 1
+    assert results[0][0] == "*IDN?"
+    assert results[0][2] is True  # is_error

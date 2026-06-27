@@ -69,6 +69,8 @@ class EngineWorker(QObject):
     presetApplied = Signal(object)
     #: ошибка операции с пресетом (строка).
     presetError = Signal(str)
+    #: результат сырой SCPI-команды терминала: (команда, ответ, is_error).
+    commandResult = Signal(str, str, bool)
 
     def __init__(self, controller, interval_ms: int = 50, parent=None) -> None:
         super().__init__(parent)
@@ -297,3 +299,22 @@ class EngineWorker(QObject):
             self.presetApplied.emit(errors)
         except Exception as exc:  # noqa: BLE001
             self.presetError.emit(f"apply preset: {exc}")
+
+    @Slot(str)
+    def send_command(self, command: str) -> None:
+        """Отправить сырую SCPI-команду из терминала (в потоке воркера).
+
+        Запрос (оканчивается на ``?``) → query; иначе write и ответ ``OK``.
+        Результат — сигналом ``commandResult(команда, ответ, is_error)``.
+        """
+        try:
+            transport = self._controller.scope.transport
+            stripped = command.strip()
+            if stripped.endswith("?"):
+                resp = transport.query(stripped)
+            else:
+                transport.write(stripped)
+                resp = "OK"
+            self.commandResult.emit(command, str(resp), False)
+        except Exception as exc:  # noqa: BLE001
+            self.commandResult.emit(command, str(exc), True)

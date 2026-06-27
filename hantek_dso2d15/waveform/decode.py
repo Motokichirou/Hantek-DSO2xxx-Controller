@@ -55,6 +55,9 @@ class DecodedFrame:
     triggered: bool = False
     scales: dict[int, float] = field(default_factory=dict)
     offsets: dict[int, float] = field(default_factory=dict)
+    #: Развёртка прибора (с/дел), если известна. Заполняется контроллером из
+    #: ``:TIMebase:SCALe?``. Используется графиком для зума окна 14×s/дел.
+    timebase: float | None = None
 
 
 def decode_frame(

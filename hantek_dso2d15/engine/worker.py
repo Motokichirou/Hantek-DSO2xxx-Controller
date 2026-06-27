@@ -183,5 +183,8 @@ class EngineWorker(QObject):
                 self._controller.refresh_scaling([n])
                 ch = self._controller.scope.channel[n]
                 self.channelReadback.emit(n, float(ch.scale), float(ch.offset), int(ch.probe))
+            # смена развёртки → обновить кэш timebase (кадры зумятся под s/дел)
+            elif path == "timebase.scale":
+                self._controller.refresh_timebase()
         except Exception as exc:  # noqa: BLE001
             self.errorOccurred.emit(f"apply_setting({path}={value!r}): {exc}")

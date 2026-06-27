@@ -12,6 +12,8 @@
 """
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import numpy as np
 import pyqtgraph as pg
 from PySide6.QtCore import Qt
@@ -19,6 +21,7 @@ from PySide6.QtWidgets import QWidget, QVBoxLayout, QLabel
 
 from hantek_dso2d15.gui.cursor_overlay import CursorOverlay
 from hantek_dso2d15.waveform.math_compute import compute_math
+from hantek_dso2d15.waveform.display_window import compute_window
 
 # Цветокод каналов (CH1 жёлтый, CH2 зелёный — как на приборе)
 CH_COLORS = {1: "#F2C300", 2: "#3FE03F", 3: "#C77DFF", 4: "#FF7DD8"}
@@ -31,6 +34,18 @@ VDIV = 8    # вертикальных делений
 def _vdiv_label(v: float) -> str:
     """Компактная подпись V/дел: '500mV' / '1V' / '100V'."""
     return f"{v * 1000:g}mV" if v < 1.0 else f"{v:g}V"
+
+
+def _time_label(s: float) -> str:
+    """Компактная подпись времени: 'ns'/'µs'/'ms'/'s'."""
+    a = abs(s)
+    if a < 1e-6:
+        return f"{s * 1e9:.3g}ns"
+    if a < 1e-3:
+        return f"{s * 1e6:.3g}µs"
+    if a < 1.0:
+        return f"{s * 1e3:.3g}ms"
+    return f"{s:.3g}s"
 
 
 def _hex_to_rgb(hex_color: str) -> tuple[int, int, int]:
@@ -204,29 +219,61 @@ class ScopePlot(QWidget):
     # ------------------------------------------------------------------
 
     def update_frame(self, decoded) -> None:
-        """Обновить кривые. V/дел берётся из ``decoded.scales`` (перевод вольт в деления)."""
+        """Обновить кривые. Показываем окно ``14×s/дел`` (зум как на приборе).
+
+        V/дел берётся из ``decoded.scales``. Развёртка ``decoded.timebase`` (с/дел)
+        задаёт зум: рисуем центральный срез памяти шириной ``14×s/дел``. Полный
+        буфер не теряется — math/курсоры получают тот же срез (``view``), поэтому их
+        единицы соответствуют видимому окну; измерения/сохранение берут полный кадр.
+        """
         n_pts = len(decoded.time)
         if n_pts == 0:
             return
-        x = np.linspace(0.0, HDIV, n_pts)
+        start, end = compute_window(n_pts, decoded.srate, getattr(decoded, "timebase", None))
+        view = self._window_view(decoded, start, end)
+        m = end - start
+        x = np.linspace(0.0, HDIV, m)
         for n, curve in self._curves.items():
-            v = decoded.channels.get(n)
-            vdiv = decoded.scales.get(n)
+            v = view.channels.get(n)
+            vdiv = view.scales.get(n)
             if v is not None and vdiv:
                 # экранная позиция в делениях = (вольты + смещение)/Vдел = count/25,
                 # так смещение двигает трассу, как на приборе
-                off = decoded.offsets.get(n, 0.0)
+                off = view.offsets.get(n, 0.0)
                 curve.setData(x, (np.asarray(v) + off) / vdiv)
             else:
                 curve.setData([], [])
 
-        self._render_math(decoded)
-        self.cursors.update_frame(decoded)
-        self._update_readout(decoded)
+        self._render_math(view)
+        self.cursors.update_frame(view)
+        self._update_readout(view)
+
+    @staticmethod
+    def _window_view(decoded, start: int, end: int):
+        """Лёгкий «вид» кадра — срез [start:end] по времени/каналам.
+
+        Масштабы/смещения/срейт/триггер/развёртка не меняются. Используется для
+        рисовки, math и курсоров, чтобы их временные единицы шли по видимому окну.
+        """
+        return SimpleNamespace(
+            time=decoded.time[start:end],
+            channels={n: np.asarray(v)[start:end] for n, v in decoded.channels.items()},
+            scales=decoded.scales,
+            offsets=decoded.offsets,
+            srate=decoded.srate,
+            triggered=decoded.triggered,
+            timebase=getattr(decoded, "timebase", None),
+        )
 
     def _update_readout(self, decoded) -> None:
-        """Бейджи: V/дел по каналам (в цвете) + срейт + статус триггера."""
+        """Бейджи: время/дел + V/дел по каналам (в цвете) + срейт + статус триггера."""
         parts = []
+        # время/дел = реально показанное окно / 14 делений (в зум-окне == s/дел прибора)
+        n_shown = len(decoded.time)
+        sr0 = decoded.srate
+        if n_shown > 1 and sr0 > 0:
+            tdiv = (n_shown / sr0) / HDIV
+            parts.append(f"<span style='color:#C5C9D1'>{_time_label(tdiv)}/дел</span>")
         for n in sorted(decoded.channels):
             color = CH_COLORS.get(n, "#C5C9D1")
             vdiv = decoded.scales.get(n)

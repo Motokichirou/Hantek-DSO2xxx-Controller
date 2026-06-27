@@ -261,6 +261,27 @@ def test_clear_scaling_cache_re_enables_scale_query():
 
 
 # ---------------------------------------------------------------------------
+# Test: timebase кэш попадает в DecodedFrame (для зума окна графиком)
+# ---------------------------------------------------------------------------
+
+def test_refresh_timebase_populates_frame():
+    """refresh_timebase() кэширует :TIMebase:SCALe? и кадр получает .timebase."""
+    controller, transport = _make_controller_ch1()
+    transport.set_response(":TIMebase:SCALe?", "5.000000e-08")
+    controller.refresh_timebase()
+    frame = controller.read_decoded_frame()
+    assert frame.timebase == 5e-8
+
+
+def test_read_decoded_frame_lazy_timebase():
+    """Без явного refresh первый кадр лениво запрашивает развёртку."""
+    controller, transport = _make_controller_ch1()
+    transport.set_response(":TIMebase:SCALe?", "2.000000e-09")
+    frame = controller.read_decoded_frame()
+    assert frame.timebase == 2e-9
+
+
+# ---------------------------------------------------------------------------
 # Фейки для тестирования read_measurements (без реального прибора)
 # ---------------------------------------------------------------------------
 

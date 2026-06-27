@@ -38,6 +38,9 @@ class AcquisitionController:
         # :SCALe?/:OFFSet? на каждый кадр (ускорение fps).
         self._scale_cache: dict[int, float] = {}
         self._offset_cache: dict[int, float] = {}
+        # Кэш развёртки (с/дел). None → запрашивается с прибора при кадре.
+        # Обновляется refresh_timebase() при смене timebase.scale.
+        self._timebase_cache: float | None = None
 
     @property
     def scope(self):
@@ -59,6 +62,17 @@ class AcquisitionController:
         """Сбросить кэш масштабов (следующий кадр снова запросит с прибора)."""
         self._scale_cache.clear()
         self._offset_cache.clear()
+
+    def refresh_timebase(self) -> None:
+        """Запросить и закэшировать развёртку (:TIMebase:SCALe?).
+
+        Вызывать после connect и при смене timebase.scale. Кадры получают это
+        значение в ``DecodedFrame.timebase`` для зума окна графиком.
+        """
+        try:
+            self._timebase_cache = float(self._scope.timebase.scale)
+        except Exception:  # noqa: BLE001 — не валим сбор из-за readback развёртки
+            self._timebase_cache = None
 
     def _scale_for(self, n: int) -> float:
         if n in self._scale_cache:
@@ -88,7 +102,13 @@ class AcquisitionController:
         chans = frame.header.enabled_channels
         scales = {n: self._scale_for(n) for n in chans}
         offsets = {n: self._offset_for(n) for n in chans}
-        return self._decoder(frame, scales, offsets)
+        if self._timebase_cache is None:
+            self.refresh_timebase()  # ленивый первый запрос развёртки
+        decoded = self._decoder(frame, scales, offsets)
+        # только настоящий DecodedFrame: кастомные декодеры возвращаем дословно
+        if isinstance(decoded, DecodedFrame):
+            decoded.timebase = self._timebase_cache
+        return decoded
 
     def read_measurements(self, requests: list) -> list:
         """Опросить автоизмерения для заданных пар (channel, item).

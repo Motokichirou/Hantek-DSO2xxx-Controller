@@ -57,17 +57,20 @@ class WaveformReader:
     def __init__(self, transport) -> None:
         self._transport = transport
 
-    def read_frame(self, max_packets: int = 64) -> RawFrame:
+    def read_frame(self, max_packets: int | None = None) -> RawFrame:
         """Прочитать один полный кадр осциллограммы (все включённые каналы).
 
         Шлёт ``PRIVate:WAVeform:DATA:ALL?`` повторно, собирая куски сэмплов в
         общий буфер по позиции ``uploaded``, пока не наберётся ``total`` байт.
         Затем парсит meta-заголовок и де-интерливит буфер по каналам.
 
-        Raises
-        ------
-        RuntimeError
-            Если за ``max_packets`` итераций не собрался полный кадр.
+        Parameters
+        ----------
+        max_packets:
+            Жёсткий лимит числа пакетов (backstop от зацикливания). ``None`` —
+            авто: после первого пакета лимит вычисляется из ``total`` (хватает на
+            любую глубину памяти, вплоть до 8M) с запасом. Передавай явное число
+            только в тестах/особых случаях.
         """
         transport = self._transport
         total: int = -1
@@ -75,8 +78,11 @@ class WaveformReader:
         buffer: bytearray | None = None
         meta: bytes | None = None
         iterations: int = 0
+        # До получения total — скромный лимит (ловит «нет валидных пакетов»).
+        limit: int = max_packets if max_packets is not None else 512
+        backstop: int = 200_000
 
-        while iterations < max_packets:
+        while iterations < limit:
             transport.write(_QUERY)
             raw = transport.read_raw()
             iterations += 1
@@ -94,6 +100,10 @@ class WaveformReader:
                 total = pkt.total
                 buffer = bytearray(total)
                 meta = bytes(raw[:_META_END])
+                # авто-лимит: пакетов под total + 25% запас (но не меньше стартового)
+                if max_packets is None and len(chunk) > 0:
+                    needed = total // len(chunk) + 16
+                    limit = min(max(limit, needed * 5 // 4), backstop)
 
             end = pkt.uploaded + len(chunk)
             buffer[pkt.uploaded:end] = chunk
@@ -103,8 +113,8 @@ class WaveformReader:
                 break
         else:
             raise RuntimeError(
-                f"WaveformReader: кадр не собран за {max_packets} пакетов "
-                f"(max_packets={max_packets})."
+                f"WaveformReader: кадр не собран за {iterations} пакетов "
+                f"(собрано {got}/{total} байт, limit={limit})."
             )
 
         header = parse_header(meta)

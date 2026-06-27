@@ -82,6 +82,7 @@ class MainWindow(QMainWindow):
         tb.addWidget(self._resources)
 
         self._btn_refresh = QPushButton("⟳")
+        self._btn_refresh.setToolTip("Обновить список приборов (пере-сканировать VISA)")
         self._btn_refresh.clicked.connect(self._refresh_resources)
         tb.addWidget(self._btn_refresh)
 

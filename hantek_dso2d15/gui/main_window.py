@@ -24,6 +24,9 @@ from hantek_dso2d15.gui.panels.horizontal import HorizontalPanel
 from hantek_dso2d15.gui.panels.trigger import TriggerPanel
 from hantek_dso2d15.gui.panels.acquire import AcquirePanel
 from hantek_dso2d15.gui.panels.measure import MeasurePanel
+from hantek_dso2d15.gui.panels.math import MathPanel
+from hantek_dso2d15.gui.panels.cursors import CursorsPanel
+from hantek_dso2d15.gui.panels.display import DisplayPanel
 
 STYLE = """
 QMainWindow, QWidget { background: #0E0F12; color: #C5C9D1; }
@@ -134,9 +137,15 @@ class MainWindow(QMainWindow):
         self._trigger = TriggerPanel()
         self._acquire = AcquirePanel()
         self._measure = MeasurePanel()
+        self._math = MathPanel()
+        self._cursors = CursorsPanel()
+        self._display = DisplayPanel()
         # settingChanged-панели (маршрутизируются в apply_setting воркера).
         # Measure имеет иной поток данных (см. проводку в _connect), потому отдельно.
         self._panels = [self._vertical, self._horizontal, self._trigger, self._acquire]
+        # Клиентские панели (Math/Cursors/Display) работают с НАШИМ графиком, а не с
+        # прибором — проводка в __init__ (ниже), активны всегда.
+        self._client_panels = [self._math, self._cursors, self._display]
 
         scope_body = QWidget()
         sl = QVBoxLayout(scope_body)
@@ -144,13 +153,25 @@ class MainWindow(QMainWindow):
         sl.setSpacing(0)
         for title, panel in (("ВЕРТИКАЛЬ", self._vertical), ("ГОРИЗОНТАЛЬ", self._horizontal),
                              ("ТРИГГЕР", self._trigger), ("ИЗМЕРЕНИЯ", self._measure),
-                             ("ACQUIRE", self._acquire)):
+                             ("ACQUIRE", self._acquire), ("MATH / FFT", self._math),
+                             ("КУРСОРЫ", self._cursors), ("ДИСПЛЕЙ", self._display)):
             hdr = QLabel(title)
             hdr.setObjectName("section")
             sl.addWidget(hdr)
-            panel.setEnabled(False)
+            if panel in self._panels or panel is self._measure:
+                panel.setEnabled(False)  # device-панели включаются при connect
             sl.addWidget(panel)
         sl.addStretch(1)
+
+        # --- проводка клиентских панелей к графику (без прибора) ---
+        self._display.displayChanged.connect(
+            lambda key, val: self._plot.apply_display({key: val})
+        )
+        self._plot.apply_display(self._display.defaults())
+        self._math.mathConfigChanged.connect(self._plot.set_math_config)
+        self._cursors.cursorModeChanged.connect(self._plot.cursors.set_mode)
+        self._cursors.cursorSourceChanged.connect(self._plot.cursors.set_source)
+        self._plot.cursors.valuesChanged.connect(self._cursors.update_readout)
 
         scope_scroll = QScrollArea()
         scope_scroll.setWidgetResizable(True)

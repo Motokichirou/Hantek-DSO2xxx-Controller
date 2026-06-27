@@ -9,14 +9,16 @@ from __future__ import annotations
 import os
 from datetime import datetime
 
-from PySide6.QtCore import Qt, QThread, QMetaObject, QElapsedTimer, Slot
+from PySide6.QtCore import Qt, QThread, QMetaObject, QElapsedTimer, Slot, Signal
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QToolBar, QComboBox, QPushButton, QLabel, QSizePolicy,
-    QDockWidget, QTabWidget, QScrollArea, QVBoxLayout, QFileDialog,
+    QDockWidget, QTabWidget, QScrollArea, QVBoxLayout, QFileDialog, QMenu,
 )
 
 from hantek_dso2d15.transport.visa_transport import VisaTransport
 from hantek_dso2d15.transport.scpi_log import ScpiLogger
+from hantek_dso2d15.io.export import export_frame
+from hantek_dso2d15.io.presets import load_preset, SnapshotScope
 from hantek_dso2d15.scpi.scope import Scope
 from hantek_dso2d15.waveform.reader import WaveformReader
 from hantek_dso2d15.engine.controller import AcquisitionController
@@ -74,6 +76,10 @@ QLabel#section { background: #1B1E24; color: #AEB4BF; font-weight: 600;
 
 
 class MainWindow(QMainWindow):
+    # запросы пресета в поток воркера (Qt маршалит str/dict)
+    _sigSavePreset = Signal(str)
+    _sigApplyPreset = Signal(object)
+
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Hantek DSO2D15")
@@ -88,6 +94,7 @@ class MainWindow(QMainWindow):
         self._thread = None
         self._fps_timer = QElapsedTimer()
         self._frame_count = 0
+        self._last_frame = None   # последний декодированный кадр (для Save)
 
         # --- центральный график ---
         self._plot = ScopePlot()
@@ -136,6 +143,24 @@ class MainWindow(QMainWindow):
         self._btn_log.setToolTip("Писать весь SCPI-обмен в файл (осциллограмма свёрнута; кап 10 МБ)")
         self._btn_log.toggled.connect(self._toggle_log)
         tb.addWidget(self._btn_log)
+
+        # Файловые действия: сохранить кадр, скриншот графика, пресеты
+        self._btn_save = QPushButton("Save")
+        self._btn_save.setToolTip("Сохранить текущий кадр (CSV/NPY/HDF5)")
+        self._btn_save.clicked.connect(self._save_waveform)
+        self._btn_save.setEnabled(False)
+        tb.addWidget(self._btn_save)
+
+        self._btn_png = QPushButton("PNG")
+        self._btn_png.setToolTip("Сохранить скриншот графика (PNG)")
+        self._btn_png.clicked.connect(self._save_screenshot)
+        tb.addWidget(self._btn_png)
+
+        self._btn_preset = QPushButton("Presets")
+        self._btn_preset.setToolTip("Сохранить/загрузить настройки прибора (JSON)")
+        self._btn_preset.clicked.connect(self._presets_menu)
+        self._btn_preset.setEnabled(False)
+        tb.addWidget(self._btn_preset)
 
         # --- правый док: табы Scope / Generator / Sweep ---
         self._dock = QDockWidget("", self)
@@ -309,6 +334,16 @@ class MainWindow(QMainWindow):
         self._worker.sweepProgress.connect(self._sweep.set_progress)
         self._worker.sweepFinished.connect(self._on_sweep_finished)
         self._worker.sweepError.connect(self._on_sweep_error)
+        # Пресеты: запросы в поток воркера; итоги — в статус-бар
+        self._sigSavePreset.connect(
+            self._worker.capture_preset_to, Qt.ConnectionType.QueuedConnection
+        )
+        self._sigApplyPreset.connect(
+            self._worker.apply_preset_dict, Qt.ConnectionType.QueuedConnection
+        )
+        self._worker.presetSaved.connect(self._on_preset_saved)
+        self._worker.presetApplied.connect(self._on_preset_applied)
+        self._worker.presetError.connect(self._on_sweep_error)
         self._thread.start()
 
         self._btn_connect.setText("Disconnect")
@@ -318,6 +353,8 @@ class MainWindow(QMainWindow):
             panel.setEnabled(True)
         self._measure.setEnabled(True)
         self._sweep.setEnabled(True)
+        self._btn_save.setEnabled(True)
+        self._btn_preset.setEnabled(True)
         self._lbl_conn.setText("● connected")
         self._lbl_conn.setStyleSheet("color: #37D67A;")
         self._lbl_idn.setText(idn)
@@ -345,6 +382,9 @@ class MainWindow(QMainWindow):
             panel.setEnabled(False)
         self._measure.setEnabled(False)
         self._sweep.setEnabled(False)
+        self._btn_save.setEnabled(False)
+        self._btn_preset.setEnabled(False)
+        self._last_frame = None
         self._btn_connect.setText("Connect")
         self._btn_run.setText("▶ RUN")
         self._btn_run.setObjectName("run")
@@ -412,12 +452,102 @@ class MainWindow(QMainWindow):
         self._lbl_metrics.setText(f"⚠ {msg}")
 
     # ------------------------------------------------------------------
+    # Save / Screenshot / Presets
+    # ------------------------------------------------------------------
+
+    def _save_waveform(self):
+        """Сохранить текущий кадр в CSV/NPY/HDF5."""
+        if self._last_frame is None:
+            self._lbl_metrics.setText("Нет кадра для сохранения (нажми RUN)")
+            return
+        path, _flt = QFileDialog.getSaveFileName(
+            self, "Сохранить кадр", "waveform",
+            "CSV (*.csv);;NumPy (*.npz);;HDF5 (*.h5)",
+        )
+        if not path:
+            return
+        low = path.lower()
+        if low.endswith((".npz", ".npy")):
+            fmt = "NPY"
+        elif low.endswith((".h5", ".hdf5")):
+            fmt = "HDF5"
+        else:
+            fmt = "CSV"
+            if not low.endswith(".csv"):
+                path += ".csv"
+        try:
+            export_frame(self._last_frame, path, fmt)
+            self._lbl_metrics.setText(f"Кадр сохранён: {path}")
+        except Exception as exc:  # noqa: BLE001
+            self._lbl_metrics.setText(f"⚠ save: {exc}")
+
+    def _save_screenshot(self):
+        """Сохранить скриншот нашего графика в PNG."""
+        path, _ = QFileDialog.getSaveFileName(self, "Скриншот графика", "scope.png", "PNG (*.png)")
+        if not path:
+            return
+        if not path.lower().endswith(".png"):
+            path += ".png"
+        if self._plot.grab().save(path, "PNG"):
+            self._lbl_metrics.setText(f"Скриншот сохранён: {path}")
+        else:
+            self._lbl_metrics.setText("⚠ не удалось сохранить PNG")
+
+    def _presets_menu(self):
+        """Меню пресетов под кнопкой."""
+        menu = QMenu(self)
+        menu.addAction("Сохранить пресет…", self._save_preset)
+        menu.addAction("Загрузить пресет…", self._load_preset)
+        menu.exec(self._btn_preset.mapToGlobal(self._btn_preset.rect().bottomLeft()))
+
+    def _save_preset(self):
+        path, _ = QFileDialog.getSaveFileName(self, "Сохранить пресет", "preset.json", "JSON (*.json)")
+        if not path:
+            return
+        if not path.lower().endswith(".json"):
+            path += ".json"
+        self._lbl_metrics.setText("Сохранение пресета…")
+        self._sigSavePreset.emit(path)   # воркер снимет настройки и запишет файл
+
+    def _load_preset(self):
+        path, _ = QFileDialog.getOpenFileName(self, "Загрузить пресет", "", "JSON (*.json)")
+        if not path:
+            return
+        try:
+            preset = load_preset(path)
+        except Exception as exc:  # noqa: BLE001
+            self._lbl_metrics.setText(f"⚠ load preset: {exc}")
+            return
+        # ресинк панелей из снапшота (без I/O); затем применить к прибору в потоке воркера
+        snap = SnapshotScope(preset)
+        for panel in (self._vertical, self._horizontal, self._trigger,
+                      self._acquire, self._generator):
+            try:
+                panel.load_from_scope(snap)
+            except Exception:  # noqa: BLE001 — неполный пресет: панель не ресинкнется, но прибор применит
+                pass
+        self._sigApplyPreset.emit(preset)
+        self._lbl_metrics.setText(f"Пресет загружается: {path}")
+
+    @Slot(str)
+    def _on_preset_saved(self, path):
+        self._lbl_metrics.setText(f"Пресет сохранён: {path}")
+
+    @Slot(object)
+    def _on_preset_applied(self, errors):
+        if errors:
+            self._lbl_metrics.setText(f"Пресет применён (ошибок путей: {len(errors)})")
+        else:
+            self._lbl_metrics.setText("Пресет применён")
+
+    # ------------------------------------------------------------------
     # Слоты сигналов worker (выполняются в UI-потоке)
     # ------------------------------------------------------------------
 
     @Slot(object)
     def _on_frame(self, decoded):
         self._plot.update_frame(decoded)
+        self._last_frame = decoded
         self._frame_count += 1
         fps = ""
         if self._fps_timer.isValid():

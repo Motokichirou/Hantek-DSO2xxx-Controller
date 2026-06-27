@@ -18,6 +18,7 @@ from PySide6.QtCore import QObject, QTimer, Signal, Slot
 from hantek_dso2d15.engine.states import RunState
 from hantek_dso2d15.engine.sweep import SweepConfig, SweepRunner
 from hantek_dso2d15.io.export import export_frame, capture_filename
+from hantek_dso2d15.io.presets import capture_preset, apply_preset, save_preset
 
 
 class EngineWorker(QObject):
@@ -62,6 +63,12 @@ class EngineWorker(QObject):
     sweepFinished = Signal(object)
     #: ошибка свипа (строка).
     sweepError = Signal(str)
+    #: пресет сохранён в файл (путь).
+    presetSaved = Signal(str)
+    #: пресет применён к прибору; payload = список путей-ошибок (пустой = всё ок).
+    presetApplied = Signal(object)
+    #: ошибка операции с пресетом (строка).
+    presetError = Signal(str)
 
     def __init__(self, controller, interval_ms: int = 50, parent=None) -> None:
         super().__init__(parent)
@@ -267,3 +274,26 @@ class EngineWorker(QObject):
             self.sweepFinished.emit(result)
         except Exception as exc:  # noqa: BLE001
             self.sweepError.emit(f"sweep: {exc}")
+
+    # ------------------------------------------------------------------
+    # Пресеты (device-I/O в потоке воркера; одноразовые операции)
+    # ------------------------------------------------------------------
+
+    @Slot(str)
+    def capture_preset_to(self, path: str) -> None:
+        """Снять настройки прибора и сохранить пресет в JSON-файл."""
+        try:
+            preset = capture_preset(self._controller.scope)
+            save_preset(preset, path)
+            self.presetSaved.emit(path)
+        except Exception as exc:  # noqa: BLE001
+            self.presetError.emit(f"save preset: {exc}")
+
+    @Slot(object)
+    def apply_preset_dict(self, preset) -> None:
+        """Применить пресет (dict путь→значение) к прибору."""
+        try:
+            errors = apply_preset(self._controller.scope, preset)
+            self.presetApplied.emit(errors)
+        except Exception as exc:  # noqa: BLE001
+            self.presetError.emit(f"apply preset: {exc}")

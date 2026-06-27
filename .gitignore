@@ -35,3 +35,10 @@ captures/
 
 # SCPI-логи (пишутся кнопкой LOG в корень проекта; не трекаем)
 scpi_*.log
+
+# Локальные выгрузки приложения по умолчанию (Save/Screenshot/Presets)
+/waveform.csv
+/waveform.npz
+/waveform.h5
+/scope.png
+/preset.json

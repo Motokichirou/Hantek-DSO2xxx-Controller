@@ -9,9 +9,15 @@
 """
 from __future__ import annotations
 
+import os
+import threading
+import time
+
 from PySide6.QtCore import QObject, QTimer, Signal, Slot
 
 from hantek_dso2d15.engine.states import RunState
+from hantek_dso2d15.engine.sweep import SweepConfig, SweepRunner
+from hantek_dso2d15.io.export import export_frame, capture_filename
 
 
 class EngineWorker(QObject):
@@ -50,6 +56,12 @@ class EngineWorker(QObject):
     #: список dict {"channel", "item", "value"} — результат опроса автоизмерений
     #: после каждого успешного кадра (только если активны запросы).
     measurementsReady = Signal(object)
+    #: прогресс свипа (done, total).
+    sweepProgress = Signal(int, int)
+    #: свип завершён — dict результата {"done","total","cancelled"}.
+    sweepFinished = Signal(object)
+    #: ошибка свипа (строка).
+    sweepError = Signal(str)
 
     def __init__(self, controller, interval_ms: int = 50, parent=None) -> None:
         super().__init__(parent)
@@ -58,6 +70,8 @@ class EngineWorker(QObject):
         # Список активных запросов автоизмерений. Пуст → измерения не опрашиваются.
         # Заполняется через set_measurements(); элементы: tuple(int, str).
         self._measure_requests: list = []
+        # Флаг отмены свипа (потокобезопасен; выставляется из GUI-потока).
+        self._sweep_cancel = threading.Event()
 
         self._timer = QTimer(self)
         self._timer.setInterval(interval_ms)
@@ -188,3 +202,68 @@ class EngineWorker(QObject):
                 self._controller.refresh_timebase()
         except Exception as exc:  # noqa: BLE001
             self.errorOccurred.emit(f"apply_setting({path}={value!r}): {exc}")
+
+    # ------------------------------------------------------------------
+    # Свип / multi-capture (выполняется в потоке воркера; блокирует его на
+    # время свипа — это нормально, отмена идёт через потокобезопасный Event).
+    # ------------------------------------------------------------------
+
+    def cancel_sweep(self) -> None:
+        """Запросить отмену свипа. Потокобезопасно — зовётся из GUI-потока."""
+        self._sweep_cancel.set()
+
+    def _sweep_sleep(self, seconds: float) -> None:
+        """Выдержка с проверкой отмены (чанками по 50 мс)."""
+        remaining = float(seconds)
+        while remaining > 0.0 and not self._sweep_cancel.is_set():
+            chunk = 0.05 if remaining > 0.05 else remaining
+            time.sleep(chunk)
+            remaining -= chunk
+
+    @Slot(object)
+    def run_sweep(self, config_dict) -> None:
+        """Запустить свип/multi-capture. Останавливает обычный сбор на время свипа.
+
+        ``config_dict`` — словарь от SweepPanel (parameter-путь, start/stop/step,
+        dwell_s, fmt, folder). Прогресс/итог/ошибка идут сигналами.
+        """
+        self.stop()                      # остановить обычный сбор
+        self._sweep_cancel.clear()
+        try:
+            cfg = SweepConfig(
+                parameter=str(config_dict["parameter"]),
+                start=float(config_dict["start"]),
+                stop=float(config_dict["stop"]),
+                step=float(config_dict["step"]),
+                dwell_s=float(config_dict["dwell_s"]),
+                fmt=str(config_dict["fmt"]),
+                folder=str(config_dict["folder"]),
+            )
+            if cfg.folder:
+                os.makedirs(cfg.folder, exist_ok=True)
+
+            scope = self._controller.scope
+            parts = cfg.parameter.split(".")
+
+            def set_param(value) -> None:
+                obj = scope
+                for token in parts[:-1]:
+                    obj = obj[int(token)] if token.isdigit() else getattr(obj, token)
+                setattr(obj, parts[-1], value)
+
+            def save(frame, i: int) -> None:
+                path = capture_filename(cfg.folder, i + 1, cfg.fmt)
+                export_frame(frame, path, cfg.fmt)
+
+            result = SweepRunner().run(
+                cfg,
+                set_param=set_param,
+                capture=self._controller.read_decoded_frame,
+                save=save,
+                sleep=self._sweep_sleep,
+                on_progress=lambda done, total: self.sweepProgress.emit(done, total),
+                should_cancel=self._sweep_cancel.is_set,
+            )
+            self.sweepFinished.emit(result)
+        except Exception as exc:  # noqa: BLE001
+            self.sweepError.emit(f"sweep: {exc}")

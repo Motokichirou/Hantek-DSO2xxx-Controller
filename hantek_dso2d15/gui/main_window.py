@@ -12,7 +12,7 @@ from datetime import datetime
 from PySide6.QtCore import Qt, QThread, QMetaObject, QElapsedTimer, Slot
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QToolBar, QComboBox, QPushButton, QLabel, QSizePolicy,
-    QDockWidget, QTabWidget, QScrollArea, QVBoxLayout,
+    QDockWidget, QTabWidget, QScrollArea, QVBoxLayout, QFileDialog,
 )
 
 from hantek_dso2d15.transport.visa_transport import VisaTransport
@@ -32,6 +32,7 @@ from hantek_dso2d15.gui.panels.math import MathPanel
 from hantek_dso2d15.gui.panels.cursors import CursorsPanel
 from hantek_dso2d15.gui.panels.display import DisplayPanel
 from hantek_dso2d15.gui.panels.generator import GeneratorPanel
+from hantek_dso2d15.gui.panels.sweep import SweepPanel
 
 STYLE = """
 QMainWindow, QWidget { background: #0E0F12; color: #C5C9D1; }
@@ -156,6 +157,8 @@ class MainWindow(QMainWindow):
         self._cursors = CursorsPanel()
         self._display = DisplayPanel()
         self._generator = GeneratorPanel()
+        self._sweep = SweepPanel()
+        self._sweep.set_folder(os.path.abspath("captures"))
         # settingChanged-панели (маршрутизируются в apply_setting воркера).
         # Measure имеет иной поток данных (см. проводку в _connect), потому отдельно.
         # Generator — в своём табе, но тоже device-facing -> в _panels.
@@ -205,7 +208,16 @@ class MainWindow(QMainWindow):
         gen_scroll.setWidget(self._generator)
         self._tabs.addTab(gen_scroll, "Generator")
 
-        self._tabs.addTab(QWidget(), "Sweep")
+        sweep_scroll = QScrollArea()
+        sweep_scroll.setWidgetResizable(True)
+        sweep_scroll.setFrameShape(QScrollArea.NoFrame)
+        self._sweep.setEnabled(False)  # включится при connect
+        sweep_scroll.setWidget(self._sweep)
+        self._tabs.addTab(sweep_scroll, "Sweep")
+
+        # пикер папки свипа (диалог в главном потоке; панель остаётся headless)
+        self._sweep.folderRequested.connect(self._pick_sweep_folder)
+
         self._dock.setWidget(self._tabs)
         self.addDockWidget(Qt.RightDockWidgetArea, self._dock)
 
@@ -285,6 +297,18 @@ class MainWindow(QMainWindow):
             self._worker.set_measurements, Qt.ConnectionType.QueuedConnection
         )
         self._worker.measurementsReady.connect(self._measure.update_values)
+        # Sweep: старт → worker.run_sweep (в его потоке); стоп → отмена (Event,
+        # потокобезопасно, проходит даже пока run_sweep блокирует поток воркера).
+        self._sweep.startRequested.connect(
+            self._worker.run_sweep, Qt.ConnectionType.QueuedConnection
+        )
+        self._sweep.startRequested.connect(lambda _c: self._sweep.set_running(True))
+        self._sweep.stopRequested.connect(
+            self._worker.cancel_sweep, Qt.ConnectionType.DirectConnection
+        )
+        self._worker.sweepProgress.connect(self._sweep.set_progress)
+        self._worker.sweepFinished.connect(self._on_sweep_finished)
+        self._worker.sweepError.connect(self._on_sweep_error)
         self._thread.start()
 
         self._btn_connect.setText("Disconnect")
@@ -293,6 +317,7 @@ class MainWindow(QMainWindow):
         for panel in self._panels:
             panel.setEnabled(True)
         self._measure.setEnabled(True)
+        self._sweep.setEnabled(True)
         self._lbl_conn.setText("● connected")
         self._lbl_conn.setStyleSheet("color: #37D67A;")
         self._lbl_idn.setText(idn)
@@ -319,6 +344,7 @@ class MainWindow(QMainWindow):
         for panel in self._panels:
             panel.setEnabled(False)
         self._measure.setEnabled(False)
+        self._sweep.setEnabled(False)
         self._btn_connect.setText("Connect")
         self._btn_run.setText("▶ RUN")
         self._btn_run.setObjectName("run")
@@ -363,6 +389,27 @@ class MainWindow(QMainWindow):
                 self._transport.set_io_logger(None)
             self._scpi_log.stop()
             self._lbl_metrics.setText("SCPI-лог остановлен")
+
+    def _pick_sweep_folder(self):
+        """Открыть диалог выбора папки для свипа (главный поток)."""
+        start_dir = self._sweep.config().get("folder") or ""
+        path = QFileDialog.getExistingDirectory(self, "Папка для свипа", start_dir)
+        if path:
+            self._sweep.set_folder(path)
+
+    @Slot(object)
+    def _on_sweep_finished(self, result):
+        self._sweep.set_running(False)
+        done, total = result.get("done", 0), result.get("total", 0)
+        if result.get("cancelled"):
+            self._lbl_metrics.setText(f"Свип отменён ({done}/{total})")
+        else:
+            self._lbl_metrics.setText(f"Свип завершён: сохранено {done}/{total}")
+
+    @Slot(str)
+    def _on_sweep_error(self, msg):
+        self._sweep.set_running(False)
+        self._lbl_metrics.setText(f"⚠ {msg}")
 
     # ------------------------------------------------------------------
     # Слоты сигналов worker (выполняются в UI-потоке)

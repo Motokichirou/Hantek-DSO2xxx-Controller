@@ -60,7 +60,7 @@ class TestStructure:
         assert callable(getattr(panel, "load_from_scope", None))
 
     def test_type_combo_has_all_literals(self, panel):
-        data = {panel._type.itemData(i) for i in range(panel._type.count())}
+        data = set(panel._type._button_map.keys())
         assert data == set(GeneratorPanel.TYPES)
 
     def test_mod_type_combo_has_all_literals(self, panel):
@@ -120,7 +120,7 @@ class TestLoadFromScope:
 
     def test_sets_type(self, panel):
         panel.load_from_scope(_make_scope(type="SQUAre"))
-        assert panel._type.currentData() == "SQUAre"
+        assert panel._type.value() == "SQUAre"
 
     def test_sets_freq(self, panel):
         panel.load_from_scope(_make_scope(freq=5000.0))
@@ -209,7 +209,7 @@ class TestTypeSignal:
         panel.load_from_scope(_make_scope(type="SINE"))
         received = []
         panel.settingChanged.connect(lambda p, v: received.append((p, v)))
-        panel._type.setCurrentIndex(panel._type.findData("SQUAre"))
+        panel._type._button_map["SQUAre"].click()
         assert len(received) == 1
         assert received[0] == ("dds.type", "SQUAre")
 
@@ -217,17 +217,17 @@ class TestTypeSignal:
         panel.load_from_scope(_make_scope(type="SINE"))
         received = []
         panel.settingChanged.connect(lambda p, v: received.append((p, v)))
-        panel._type.setCurrentIndex(panel._type.findData("RAMP"))
+        panel._type._button_map["RAMP"].click()
         assert received and isinstance(received[0][1], str)
 
     def test_change_type_all_literals(self, panel):
-        """Все 10 типов правильно эмитируются."""
+        """Все 10 типов правильно эмитируются кликом по плитке."""
         for literal in GeneratorPanel.TYPES:
             other = "RAMP" if literal != "RAMP" else "SINE"
             panel.load_from_scope(_make_scope(type=other))
             received = []
             panel.settingChanged.connect(lambda p, v, r=received: r.append((p, v)))
-            panel._type.setCurrentIndex(panel._type.findData(literal))
+            panel._type._button_map[literal].click()
             panel.settingChanged.disconnect()
             assert received and received[0][1] == literal, (
                 f"Ожидался литерал {literal!r}, получили {received}"

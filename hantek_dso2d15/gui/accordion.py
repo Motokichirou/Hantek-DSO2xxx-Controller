@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 from PySide6.QtCore import Qt, Signal
+from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
@@ -44,7 +45,13 @@ QLabel#SectionTitle {{
 }}
 QLabel#SectionChevron {{
     color: {_CHEVRON_FG};
-    font-size: 11px;
+    font-size: 10px;
+    background: transparent;
+}}
+QLabel#SectionChip {{
+    font-family: 'JetBrains Mono','Consolas',monospace;
+    font-size: 10px;
+    font-weight: 600;
     background: transparent;
 }}
 """
@@ -75,12 +82,22 @@ class _HeaderWidget(QWidget):
 
         self._title_label = QLabel(title.upper())
         self._title_label.setObjectName("SectionTitle")
+        # letter-spacing .7px по макету — QSS его не поддерживает, ставим через QFont
+        tf = self._title_label.font()
+        tf.setLetterSpacing(QFont.SpacingType.AbsoluteSpacing, 0.7)
+        self._title_label.setFont(tf)
+
+        # summary-чип (моноширинный, цветной) — скрыт, пока пуст
+        self._chip_label = QLabel("")
+        self._chip_label.setObjectName("SectionChip")
+        self._chip_label.hide()
 
         self._chevron_label = QLabel(_CHEVRON_EXPANDED)
         self._chevron_label.setObjectName("SectionChevron")
 
         lay.addWidget(self._title_label)
         lay.addStretch()
+        lay.addWidget(self._chip_label)
         lay.addWidget(self._chevron_label)
 
     def mousePressEvent(self, event) -> None:  # type: ignore[override]
@@ -136,8 +153,9 @@ class CollapsibleSection(QWidget):
         # Применить QSS
         self.setStyleSheet(_HEADER_QSS)
 
-        # Ярлык для удобного доступа тестов к лейблу шеврона
+        # Ярлыки для удобного доступа тестов
         self._chevron: QLabel = self._header._chevron_label
+        self._chip: QLabel = self._header._chip_label
 
         # Выставить начальное состояние (без эмиссии сигнала)
         self._apply_state()
@@ -188,3 +206,17 @@ class CollapsibleSection(QWidget):
     def header(self) -> QWidget:
         """Вернуть виджет заголовка (для objectName/стиля)."""
         return self._header
+
+    def set_summary(self, text: str, color: str = "#7A808C") -> None:
+        """Задать summary-чип справа в заголовке (моноширинный, цветной).
+
+        Пустой text — скрыть чип. Цвет по умолчанию — приглушённый; для активных
+        состояний передавай акцент (напр. цвет канала / math-magenta).
+        """
+        if text:
+            self._chip.setText(text)
+            self._chip.setStyleSheet(f"#SectionChip {{ color: {color}; }}")
+            self._chip.show()
+        else:
+            self._chip.clear()
+            self._chip.hide()

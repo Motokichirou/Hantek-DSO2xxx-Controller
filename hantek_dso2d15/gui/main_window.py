@@ -12,7 +12,7 @@ from datetime import datetime
 from PySide6.QtCore import Qt, QThread, QMetaObject, QElapsedTimer, Slot, Signal
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QToolBar, QComboBox, QPushButton, QLabel, QSizePolicy,
-    QDockWidget, QTabWidget, QScrollArea, QVBoxLayout, QFileDialog, QMenu, QSplitter,
+    QDockWidget, QTabWidget, QScrollArea, QVBoxLayout, QFileDialog, QMenu,
 )
 
 from hantek_dso2d15.transport.visa_transport import VisaTransport
@@ -174,21 +174,30 @@ class MainWindow(QMainWindow):
         # прибором — проводка в __init__ (ниже), активны всегда.
         self._client_panels = [self._math, self._cursors, self._display]
 
-        # аккордеон в вертикальном сплиттере: разделители между секциями можно
-        # тянуть мышью, перераспределяя высоту (напр. увеличить таблицу измерений).
-        scope_body = QSplitter(Qt.Vertical)
-        scope_body.setObjectName("ScopeAccordion")
-        scope_body.setChildrenCollapsible(False)
-        scope_body.setHandleWidth(3)
+        # аккордеон: естественная укладка по контенту. Развёрнутая секция занимает
+        # ровно свою высоту, свёрнутая — высоту шапки; нижняя растяжка поглощает
+        # слабину (одна развёрнутая секция НЕ растягивается на весь экран).
+        scope_body = QWidget()
+        sl = QVBoxLayout(scope_body)
+        sl.setContentsMargins(0, 0, 0, 0)
+        sl.setSpacing(0)
+        self._sections: dict[str, CollapsibleSection] = {}
         # по умолчанию развёрнуты Вертикаль/Горизонталь/Триггер/Измерения
-        for title, panel, expanded in (
-                ("ВЕРТИКАЛЬ", self._vertical, True), ("ГОРИЗОНТАЛЬ", self._horizontal, True),
-                ("ТРИГГЕР", self._trigger, True), ("ИЗМЕРЕНИЯ", self._measure, True),
-                ("ACQUIRE", self._acquire, False), ("MATH / FFT", self._math, False),
-                ("КУРСОРЫ", self._cursors, False), ("ДИСПЛЕЙ", self._display, False)):
+        for key, title, panel, expanded in (
+                ("vertical", "ВЕРТИКАЛЬ", self._vertical, True),
+                ("horizontal", "ГОРИЗОНТАЛЬ", self._horizontal, True),
+                ("trigger", "ТРИГГЕР", self._trigger, True),
+                ("measure", "ИЗМЕРЕНИЯ", self._measure, True),
+                ("acquire", "ACQUIRE", self._acquire, False),
+                ("math", "MATH / FFT", self._math, False),
+                ("cursors", "КУРСОРЫ", self._cursors, False),
+                ("display", "ДИСПЛЕЙ", self._display, False)):
             if panel in self._panels or panel is self._measure:
                 panel.setEnabled(False)  # device-панели включаются при connect
-            scope_body.addWidget(CollapsibleSection(title, panel, expanded=expanded))
+            section = CollapsibleSection(title, panel, expanded=expanded)
+            self._sections[key] = section
+            sl.addWidget(section)
+        sl.addStretch(1)
 
         # --- проводка клиентских панелей к графику (без прибора) ---
         self._display.displayChanged.connect(
@@ -196,6 +205,9 @@ class MainWindow(QMainWindow):
         )
         self._plot.apply_display(self._display.defaults())
         self._math.mathConfigChanged.connect(self._plot.set_math_config)
+        # summary-чипы в заголовках секций (как в макете: счётчик/акцент справа)
+        self._measure.measurementsChanged.connect(self._on_measure_summary)
+        self._math.mathConfigChanged.connect(self._on_math_summary)
         self._cursors.cursorModeChanged.connect(self._plot.cursors.set_mode)
         self._cursors.cursorSourceChanged.connect(self._plot.cursors.set_source)
         self._plot.cursors.valuesChanged.connect(self._cursors.update_readout)
@@ -572,6 +584,25 @@ class MainWindow(QMainWindow):
         """Сбросить накопленную статистику измерений и очистить таблицу бейджа."""
         self._meas_stats.reset()
         self._plot.set_measurements_readout("")
+
+    def _on_measure_summary(self, rows):
+        """Summary-чип секции ИЗМЕРЕНИЯ — число активных измерений."""
+        sec = self._sections.get("measure")
+        if sec is not None:
+            n = len(list(rows))
+            sec.set_summary(str(n) if n else "", "#37D67A")
+
+    def _on_math_summary(self, cfg):
+        """Summary-чип секции MATH — операция (magenta), когда math включён."""
+        sec = self._sections.get("math")
+        if sec is None:
+            return
+        if cfg and cfg.get("display"):
+            op = str(cfg.get("operator", "")).upper()
+            label = "FFT" if op == "FFT" else op[:3] or "ON"
+            sec.set_summary(label, "#C77DFF")
+        else:
+            sec.set_summary("")
 
     def _pick_sweep_folder(self):
         """Открыть диалог выбора папки для свипа (главный поток)."""

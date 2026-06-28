@@ -181,6 +181,25 @@ class TestChevron:
         section._on_header_clicked()
         assert section._chevron.text() == "▾"
 
+
+# ---------------------------------------------------------------------------
+# 5. Summary-чип заголовка
+# ---------------------------------------------------------------------------
+
+class TestSummaryChip:
+    def test_chip_hidden_by_default(self, section):
+        assert section._chip.isHidden()
+
+    def test_set_summary_shows_text(self, section):
+        section.set_summary("Edge · CH1", "#F2C300")
+        assert section._chip.text() == "Edge · CH1"
+        assert section._chip.isHidden() is False
+
+    def test_empty_summary_hides_chip(self, section):
+        section.set_summary("4")
+        section.set_summary("")
+        assert section._chip.isHidden()
+
     def test_chevron_via_set_expanded(self, section):
         section.set_expanded(False)
         assert section._chevron.text() == "▸"

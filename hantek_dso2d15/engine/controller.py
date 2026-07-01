@@ -41,6 +41,9 @@ class AcquisitionController:
         # Кэш развёртки (с/дел). None → запрашивается с прибора при кадре.
         # Обновляется refresh_timebase() при смене timebase.scale.
         self._timebase_cache: float | None = None
+        # Кэш триггера (уровень В, канал-источник) — для маркеров на графике.
+        self._trig_level_cache: float | None = None
+        self._trig_source_cache: int | None = None
 
     @property
     def scope(self):
@@ -74,6 +77,29 @@ class AcquisitionController:
         except Exception:  # noqa: BLE001 — не валим сбор из-за readback развёртки
             self._timebase_cache = None
 
+    def refresh_trigger(self) -> None:
+        """Запросить и закэшировать уровень/источник триггера (для маркеров).
+
+        Источник ``CHANnel<n>`` → номер канала; иначе (EXT и т.п.) → None.
+        Вызывать после connect и при смене настроек триггера.
+        """
+        try:
+            self._trig_level_cache = float(self._scope.trigger.edge.level)
+        except Exception:  # noqa: BLE001
+            self._trig_level_cache = None
+        try:
+            src = str(self._scope.trigger.edge.source)
+            self._trig_source_cache = (
+                int(src[len("CHANnel"):]) if src.upper().startswith("CHAN") else None
+            )
+        except Exception:  # noqa: BLE001
+            self._trig_source_cache = None
+
+    @property
+    def last_read_packets(self) -> int:
+        """Число USB-пакетов последнего чтения осциллограммы (диагностика скорости)."""
+        return getattr(self._reader, "last_packets", 0)
+
     def _scale_for(self, n: int) -> float:
         if n in self._scale_cache:
             return self._scale_cache[n]
@@ -104,10 +130,14 @@ class AcquisitionController:
         offsets = {n: self._offset_for(n) for n in chans}
         if self._timebase_cache is None:
             self.refresh_timebase()  # ленивый первый запрос развёртки
+        if self._trig_level_cache is None and self._trig_source_cache is None:
+            self.refresh_trigger()   # ленивый первый запрос триггера
         decoded = self._decoder(frame, scales, offsets)
         # только настоящий DecodedFrame: кастомные декодеры возвращаем дословно
         if isinstance(decoded, DecodedFrame):
             decoded.timebase = self._timebase_cache
+            decoded.trigger_level = self._trig_level_cache
+            decoded.trigger_source = self._trig_source_cache
         return decoded
 
     def read_measurements(self, requests: list) -> list:

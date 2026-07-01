@@ -87,7 +87,7 @@ class TestLoadFromScope:
     def test_load_fills_mode(self, panel):
         """После load _mode показывает правильный режим."""
         panel.load_from_scope(_make_scope(mode="XY"))
-        assert panel._mode.currentText() == "XY"
+        assert panel._mode.value() == "XY"
 
     def test_load_fills_scale(self, panel):
         """После load _scale содержит правильный масштаб."""
@@ -121,25 +121,25 @@ class TestLoadFromScope:
 
 class TestModeSignal:
     def test_change_to_xy_emits_canonical(self, panel):
-        """Смена режима на XY → settingChanged('timebase.mode', 'XY')."""
+        """Клик по сегменту XY → settingChanged('timebase.mode', 'XY')."""
         received = []
         panel.settingChanged.connect(lambda p, v: received.append((p, v)))
-        panel._mode.setCurrentText("XY")
+        panel._mode._button_map["XY"].click()
         assert len(received) == 1, f"Ожидался 1 сигнал, получено: {received}"
         assert received[0] == ("timebase.mode", "XY")
 
     def test_change_to_roll_emits_canonical(self, panel):
-        """Смена режима на ROLL → settingChanged('timebase.mode', 'ROLL')."""
+        """Клик по сегменту ROLL → settingChanged('timebase.mode', 'ROLL')."""
         received = []
         panel.settingChanged.connect(lambda p, v: received.append((p, v)))
-        panel._mode.setCurrentText("ROLL")
+        panel._mode._button_map["ROLL"].click()
         assert received == [("timebase.mode", "ROLL")]
 
     def test_mode_value_is_string(self, panel):
         """Значение в сигнале — строка, не None."""
         received = []
         panel.settingChanged.connect(lambda p, v: received.append((p, v)))
-        panel._mode.setCurrentText("XY")
+        panel._mode._button_map["XY"].click()
         assert received and isinstance(received[0][1], str)
 
 
@@ -284,8 +284,7 @@ class TestPanelStructure:
         assert callable(getattr(panel, "load_from_scope", None))
 
     def test_mode_combo_has_all_modes(self, panel):
-        items = [panel._mode.itemData(i) for i in range(panel._mode.count())]
-        assert set(items) == {"MAIN", "XY", "ROLL"}
+        assert set(panel._mode._button_map.keys()) == {"MAIN", "XY", "ROLL"}
 
     def test_has_win_enable_checkbox(self, panel):
         assert hasattr(panel, "_win_enable")

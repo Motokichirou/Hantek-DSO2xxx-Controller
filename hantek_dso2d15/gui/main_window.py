@@ -33,60 +33,32 @@ from hantek_dso2d15.gui.panels.measure import MeasurePanel
 from hantek_dso2d15.gui.panels.math import MathPanel
 from hantek_dso2d15.gui.panels.cursors import CursorsPanel
 from hantek_dso2d15.gui.panels.display import DisplayPanel
+from hantek_dso2d15.gui.panels.decode import DecodePanel
 from hantek_dso2d15.gui.panels.generator import GeneratorPanel
 from hantek_dso2d15.gui.panels.sweep import SweepPanel
 from hantek_dso2d15.gui.scpi_terminal import ScpiTerminal
+from hantek_dso2d15.gui.accordion import CollapsibleSection
+from hantek_dso2d15.measure_stats import MeasurementStats
+from hantek_dso2d15.gui.theme import STYLESHEET
 
-STYLE = """
-QMainWindow, QWidget { background: #0E0F12; color: #C5C9D1; }
-QToolBar { background: #16181D; border: none; spacing: 8px; padding: 6px; }
-QComboBox { background: #0E0F12; border: 1px solid #2A2D34; border-radius: 5px;
-            padding: 4px 8px; color: #E6E9EF; }
-QComboBox#resources { min-width: 320px; }
-QDoubleSpinBox { background: #0E0F12; border: 1px solid #2A2D34; border-radius: 4px;
-                 padding: 3px 18px 3px 6px; color: #E6E9EF; }
-QDoubleSpinBox::up-button { subcontrol-origin: border; subcontrol-position: top right;
-                 width: 16px; border-left: 1px solid #2A2D34; background: #1B1E24;
-                 border-top-right-radius: 4px; }
-QDoubleSpinBox::down-button { subcontrol-origin: border; subcontrol-position: bottom right;
-                 width: 16px; border-left: 1px solid #2A2D34; background: #1B1E24;
-                 border-bottom-right-radius: 4px; }
-QDoubleSpinBox::up-button:hover, QDoubleSpinBox::down-button:hover { background: #2A2D34; }
-QDoubleSpinBox::up-arrow { width: 0; height: 0; border-left: 4px solid transparent;
-                 border-right: 4px solid transparent; border-bottom: 5px solid #9AA0AC; }
-QDoubleSpinBox::down-arrow { width: 0; height: 0; border-left: 4px solid transparent;
-                 border-right: 4px solid transparent; border-top: 5px solid #9AA0AC; }
-QCheckBox { color: #9AA0AC; }
-QPushButton { background: #1B1E24; border: 1px solid #2A2D34; border-radius: 5px;
-              padding: 6px 14px; color: #C5C9D1; font-weight: 600; }
-QPushButton:hover { border-color: #3A3F49; }
-QPushButton#run { background: rgba(55,214,122,0.16); border-color: #2F4A3C; color: #37D67A; }
-QPushButton#stop { background: rgba(229,72,77,0.16); border-color: #5A2A2C; color: #E5484D; }
-QPushButton#single { color: #F5A623; border-color: #6A521E; }
-QPushButton#log:checked { background: rgba(229,72,77,0.20); border-color: #5A2A2C; color: #E5484D; }
-QPushButton#scpi:checked { background: rgba(55,214,122,0.16); border-color: #2F4A3C; color: #37D67A; }
-QPushButton:disabled { color: #5A606C; }
-QStatusBar { background: #16181D; color: #6E747F; }
-QLabel { color: #9AA0AC; }
-QDockWidget { color: #AEB4BF; }
-QTabWidget::pane { border: none; background: #13151A; }
-QTabBar::tab { background: #16181D; color: #7A808C; padding: 8px 14px; border: none; }
-QTabBar::tab:selected { color: #E6E9EF; border-bottom: 2px solid #37D67A; }
-QLabel#section { background: #1B1E24; color: #AEB4BF; font-weight: 600;
-                 padding: 5px 10px; letter-spacing: 0.7px; }
-"""
+
+def _html_escape(s: str) -> str:
+    """Экранировать спецсимволы HTML (пробелы сохраняет <pre>)."""
+    return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
 
 class MainWindow(QMainWindow):
     # запросы пресета в поток воркера (Qt маршалит str/dict)
     _sigSavePreset = Signal(str)
     _sigApplyPreset = Signal(object)
+    #: универсальная отправка настройки в поток воркера (напр. drag уровня триггера)
+    _sigApplySetting = Signal(str, object)
 
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Hantek DSO2D15")
         self.resize(1280, 720)
-        self.setStyleSheet(STYLE)
+        self.setStyleSheet(STYLESHEET)
 
         # --- движок/соединение ---
         self._transport = None
@@ -187,9 +159,11 @@ class MainWindow(QMainWindow):
         self._trigger = TriggerPanel()
         self._acquire = AcquirePanel()
         self._measure = MeasurePanel()
+        self._meas_stats = MeasurementStats()   # клиентская статистика измерений
         self._math = MathPanel()
         self._cursors = CursorsPanel()
         self._display = DisplayPanel()
+        self._decode = DecodePanel()
         self._generator = GeneratorPanel()
         self._sweep = SweepPanel()
         self._sweep.set_folder(os.path.abspath("captures"))
@@ -200,22 +174,32 @@ class MainWindow(QMainWindow):
                         self._generator]
         # Клиентские панели (Math/Cursors/Display) работают с НАШИМ графиком, а не с
         # прибором — проводка в __init__ (ниже), активны всегда.
-        self._client_panels = [self._math, self._cursors, self._display]
+        self._client_panels = [self._math, self._cursors, self._display, self._decode]
 
+        # аккордеон: естественная укладка по контенту. Развёрнутая секция занимает
+        # ровно свою высоту, свёрнутая — высоту шапки; нижняя растяжка поглощает
+        # слабину (одна развёрнутая секция НЕ растягивается на весь экран).
         scope_body = QWidget()
         sl = QVBoxLayout(scope_body)
         sl.setContentsMargins(0, 0, 0, 0)
         sl.setSpacing(0)
-        for title, panel in (("ВЕРТИКАЛЬ", self._vertical), ("ГОРИЗОНТАЛЬ", self._horizontal),
-                             ("ТРИГГЕР", self._trigger), ("ИЗМЕРЕНИЯ", self._measure),
-                             ("ACQUIRE", self._acquire), ("MATH / FFT", self._math),
-                             ("КУРСОРЫ", self._cursors), ("ДИСПЛЕЙ", self._display)):
-            hdr = QLabel(title)
-            hdr.setObjectName("section")
-            sl.addWidget(hdr)
+        self._sections: dict[str, CollapsibleSection] = {}
+        # по умолчанию развёрнуты Вертикаль/Горизонталь/Триггер/Измерения
+        for key, title, panel, expanded in (
+                ("vertical", "ВЕРТИКАЛЬ", self._vertical, True),
+                ("horizontal", "ГОРИЗОНТАЛЬ", self._horizontal, True),
+                ("trigger", "ТРИГГЕР", self._trigger, True),
+                ("measure", "ИЗМЕРЕНИЯ", self._measure, True),
+                ("acquire", "ACQUIRE", self._acquire, False),
+                ("math", "MATH / FFT", self._math, False),
+                ("cursors", "КУРСОРЫ", self._cursors, False),
+                ("decode", "ДЕКОД ШИН", self._decode, False),
+                ("display", "ДИСПЛЕЙ", self._display, False)):
             if panel in self._panels or panel is self._measure:
                 panel.setEnabled(False)  # device-панели включаются при connect
-            sl.addWidget(panel)
+            section = CollapsibleSection(title, panel, expanded=expanded)
+            self._sections[key] = section
+            sl.addWidget(section)
         sl.addStretch(1)
 
         # --- проводка клиентских панелей к графику (без прибора) ---
@@ -224,9 +208,15 @@ class MainWindow(QMainWindow):
         )
         self._plot.apply_display(self._display.defaults())
         self._math.mathConfigChanged.connect(self._plot.set_math_config)
+        # summary-чипы в заголовках секций (как в макете: счётчик/акцент справа)
+        self._measure.measurementsChanged.connect(self._on_measure_summary)
+        self._math.mathConfigChanged.connect(self._on_math_summary)
+        self._decode.decodeConfigChanged.connect(self._plot.set_decode_config)
         self._cursors.cursorModeChanged.connect(self._plot.cursors.set_mode)
         self._cursors.cursorSourceChanged.connect(self._plot.cursors.set_source)
         self._plot.cursors.valuesChanged.connect(self._cursors.update_readout)
+        # перетаскивание уровня триггера мышью на графике → прибор + панель
+        self._plot.triggerLevelChanged.connect(self._on_trigger_level_dragged)
 
         scope_scroll = QScrollArea()
         scope_scroll.setWidgetResizable(True)
@@ -299,11 +289,29 @@ class MainWindow(QMainWindow):
         else:
             self._disconnect()
 
+    def _set_connecting_ui(self, busy: bool) -> None:
+        """Лёгкая обратная связь на коннекте: открытие VISA блокирует UI-поток на
+        3-5 с (анимация невозможна без потоков), поэтому хотя бы сразу показываем
+        статус и принудительно перерисовываем кнопку/лейбл до фриза.
+        """
+        if busy:
+            self._btn_connect.setEnabled(False)
+            self._btn_connect.setText("⏳ Подключение…")
+            self._lbl_conn.setText("● connecting…")
+            self._lbl_conn.setStyleSheet("color: #F5A623;")
+            # принудительная немедленная перерисовка (до блокирующего VISA-вызова)
+            self._btn_connect.repaint()
+            self._lbl_conn.repaint()
+        else:
+            self._btn_connect.setEnabled(True)
+            self._btn_connect.setText("Connect")
+
     def _connect(self):
         resource = self._resources.currentText().strip()
         if not resource:
             self._lbl_idn.setText("Нет VISA-ресурса. Подключи прибор и нажми ⟳.")
             return
+        self._set_connecting_ui(True)
         try:
             self._transport = VisaTransport(resource, timeout_ms=8000)
             if self._scpi_log.is_active:
@@ -322,16 +330,22 @@ class MainWindow(QMainWindow):
             self._measure.load_from_scope(self._scope)
         except Exception as exc:  # noqa: BLE001
             self._lbl_idn.setText(f"Ошибка подключения: {exc}")
+            self._lbl_conn.setText("● offline")
+            self._lbl_conn.setStyleSheet("color: #5A606C;")
             self._scope = None
+            self._set_connecting_ui(False)
             return
 
         # worker в фоновом потоке
-        self._worker = EngineWorker(self._controller, interval_ms=5)
+        # 50 мс (≈20 Гц): даёт USB-потоку osc передышку между кадрами. 5 мс (200 Гц)
+        # провоцировал десинк USBTMC → «кадр не собран за 512 пакетов».
+        self._worker = EngineWorker(self._controller, interval_ms=50)
         self._thread = QThread(self)
         self._worker.moveToThread(self._thread)
         self._worker.frameReady.connect(self._on_frame)
         self._worker.errorOccurred.connect(self._on_error)
         self._worker.stateChanged.connect(self._on_state)
+        self._worker.diagTiming.connect(self._on_diag_timing)
         # контролы панелей → слот воркера в его потоке (Qt маршалит payload)
         for panel in self._panels:
             panel.settingChanged.connect(
@@ -344,6 +358,8 @@ class MainWindow(QMainWindow):
             self._worker.set_measurements, Qt.ConnectionType.QueuedConnection
         )
         self._worker.measurementsReady.connect(self._measure.update_values)
+        self._worker.measurementsReady.connect(self._on_measurements_badge)
+        self._measure.statsResetRequested.connect(self._reset_meas_stats)
         # Sweep: старт → worker.run_sweep (в его потоке); стоп → отмена (Event,
         # потокобезопасно, проходит даже пока run_sweep блокирует поток воркера).
         self._sweep.startRequested.connect(
@@ -366,6 +382,9 @@ class MainWindow(QMainWindow):
         self._worker.presetSaved.connect(self._on_preset_saved)
         self._worker.presetApplied.connect(self._on_preset_applied)
         self._worker.presetError.connect(self._on_sweep_error)
+        self._sigApplySetting.connect(
+            self._worker.apply_setting, Qt.ConnectionType.QueuedConnection
+        )
         # SCPI-терминал: команда → воркер; результат → журнал терминала
         self._terminal.commandEntered.connect(
             self._worker.send_command, Qt.ConnectionType.QueuedConnection
@@ -373,6 +392,7 @@ class MainWindow(QMainWindow):
         self._worker.commandResult.connect(self._on_command_result)
         self._thread.start()
 
+        self._btn_connect.setEnabled(True)   # снять busy-disable коннекта
         self._btn_connect.setText("Disconnect")
         self._btn_run.setEnabled(True)
         self._btn_single.setEnabled(True)
@@ -437,11 +457,13 @@ class MainWindow(QMainWindow):
         else:
             self._frame_count = 0
             self._fps_timer.restart()
+            self._reset_meas_stats()   # новый прогон Run → статистика с нуля
             QMetaObject.invokeMethod(self._worker, "start", Qt.ConnectionType.QueuedConnection)
 
     def _single(self):
         if self._worker is None:
             return
+        self._reset_meas_stats()       # Single → статистика с нуля
         QMetaObject.invokeMethod(self._worker, "single", Qt.ConnectionType.QueuedConnection)
 
     def _toggle_log(self, on: bool):
@@ -466,6 +488,125 @@ class MainWindow(QMainWindow):
     @Slot(str, str, bool)
     def _on_command_result(self, cmd, response, is_error):
         self._terminal.append_response(response, is_error)
+
+    @Slot(float)
+    def _on_trigger_level_dragged(self, volts):
+        """Уровень триггера перетащили на графике → в прибор + синхронизировать панель."""
+        self._sigApplySetting.emit("trigger.edge.level", float(volts))
+        self._trigger.update_level(float(volts))
+
+    def _on_measurements_badge(self, payload):
+        """Накопить статистику измерений и показать таблицу в бейдже графика.
+
+        Прибор отдаёт только текущее значение; cur/avg/max/min/std/count копим у
+        себя (``self._meas_stats``). Строим компактную HTML-таблицу по активному
+        набору (порядок payload) и пушим в бейдж. Пустой набор — очищает таблицу.
+        """
+        self._meas_stats.update(payload)
+        self._plot.set_measurements_readout(self._build_stats_table(payload))
+
+    # Жёсткая таблица статистики: моноширинные колонки фиксированной ширины
+    # (значения не «прыгают» при смене длины). Ширины в символах.
+    _STATS_W_LABEL = 13     # столбец «CHn ITEM»
+    _STATS_W_NUM = 11       # числовые столбцы (cur/avg/max/min/std/rms)
+    _STATS_W_CNT = 6        # счётчик
+
+    @staticmethod
+    def _pad(text: str, width: int, *, right: bool) -> str:
+        """Обрезать до width и выровнять моноширинно, ГАРАНТИРУЯ ≥1 пробел-разделитель.
+
+        Содержимое ограничено ``width-1`` символами — поэтому при выравнивании всегда
+        остаётся минимум один пробел (иначе соседние колонки слипаются).
+        """
+        s = str(text)
+        maxc = max(1, width - 1)          # резерв ≥1 символа под разделитель
+        if len(s) > maxc:
+            s = s[: max(0, maxc - 1)] + "…"
+        return s.rjust(width) if right else s.ljust(width)
+
+    def _build_stats_table(self, payload) -> str:
+        """Жёсткая моноширинная таблица статистики измерений (строки = активный набор).
+
+        Колонки фиксированной ширины через ``<pre>``: Изм · Cur · Avg · Max · Min ·
+        Std · RMS · Cnt. Строки окрашены по каналу; шапка серая.
+        """
+        from hantek_dso2d15.gui.panels.measure import _fmt_value
+        from hantek_dso2d15.gui.theme import CH_COLORS
+
+        wl, wn, wc = self._STATS_W_LABEL, self._STATS_W_NUM, self._STATS_W_CNT
+
+        def _num(val, item):
+            try:
+                return _fmt_value(item, float(val))
+            except (TypeError, ValueError):
+                return "—"
+
+        lines = []
+        seen = set()
+        for entry in payload or []:
+            try:
+                ch = int(entry["channel"])
+                item = str(entry["item"])
+            except (KeyError, TypeError, ValueError):
+                continue
+            key = (ch, item)
+            if key in seen:
+                continue
+            seen.add(key)
+            s = self._meas_stats.stats_for(ch, item)
+            if s is None:
+                continue
+            color = CH_COLORS.get(ch, "#C5C9D1")
+            row = (
+                self._pad(f"CH{ch} {item}", wl, right=False)
+                + self._pad(_num(s["cur"], item), wn, right=True)
+                + self._pad(_num(s["avg"], item), wn, right=True)
+                + self._pad(_num(s["max"], item), wn, right=True)
+                + self._pad(_num(s["min"], item), wn, right=True)
+                + self._pad(_num(s["std"], item), wn, right=True)
+                + self._pad(_num(s["rms"], item), wn, right=True)
+                + self._pad(str(s["count"]), wc, right=True)
+            )
+            lines.append(f"<span style='color:{color}'>{_html_escape(row)}</span>")
+        if not lines:
+            return ""
+        header = (
+            self._pad("Изм", wl, right=False)
+            + self._pad("Cur", wn, right=True)
+            + self._pad("Avg", wn, right=True)
+            + self._pad("Max", wn, right=True)
+            + self._pad("Min", wn, right=True)
+            + self._pad("Std", wn, right=True)
+            + self._pad("RMS", wn, right=True)
+            + self._pad("Cnt", wc, right=True)
+        )
+        head_span = f"<span style='color:#7A808C'>{_html_escape(header)}</span>"
+        body = "\n".join([head_span] + lines)
+        return f"<pre style='margin:0;font-family:JetBrains Mono,Consolas,monospace'>{body}</pre>"
+
+    def _reset_meas_stats(self):
+        """Сбросить накопленную статистику измерений и очистить таблицу бейджа."""
+        self._meas_stats.reset()
+        self._plot.set_measurements_readout("")
+
+    def _on_measure_summary(self, rows):
+        """Summary-чип секции ИЗМЕРЕНИЯ — число активных измерений."""
+        sec = self._sections.get("measure")
+        if sec is not None:
+            n = len(list(rows))
+            sec.set_summary(str(n) if n else "", "#37D67A")
+
+    def _on_math_summary(self, cfg):
+        """Summary-чип секции MATH — операция (magenta), когда math включён."""
+        sec = self._sections.get("math")
+        if sec is None:
+            return
+        if cfg and cfg.get("display"):
+            op = str(cfg.get("operator", "")).upper()
+            label = "FFT" if op == "FFT" else op[:3] or "ON"
+            sec.set_summary(label, "#C77DFF")
+        else:
+            sec.set_summary("")
 
     def _pick_sweep_folder(self):
         """Открыть диалог выбора папки для свипа (главный поток)."""
@@ -582,18 +723,35 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------
 
     @Slot(object)
+    def _on_diag_timing(self, read_ms: float, meas_ms: float, packets: int) -> None:
+        """Диагностика кадра: мс чтения · мс измерений · число USB-пакетов."""
+        self._diag_read_ms = float(read_ms)
+        self._diag_meas_ms = float(meas_ms)
+        self._diag_packets = int(packets)
+
     def _on_frame(self, decoded):
         self._plot.update_frame(decoded)
         self._last_frame = decoded
+        # FPS по скользящему окну ~1 с (истинная текущая скорость, а не среднее с
+        # момента старта — иначе медленный разгон занижает цифру надолго).
         self._frame_count += 1
-        fps = ""
         if self._fps_timer.isValid():
-            el = self._fps_timer.elapsed() / 1000.0
-            if el > 0:
-                fps = f" · {self._frame_count / el:.1f} fps"
+            el = self._fps_timer.elapsed()
+            if el >= 1000:
+                self._fps_display = self._frame_count * 1000.0 / el
+                self._frame_count = 0
+                self._fps_timer.restart()
+        fps_val = getattr(self, "_fps_display", 0.0)
+        fps = f" · {fps_val:.1f} fps" if fps_val else ""
         trig = "Trig'd" if decoded.triggered else "Auto"
+        diag = ""
+        rd = getattr(self, "_diag_read_ms", None)
+        if rd is not None:
+            ms = getattr(self, "_diag_meas_ms", 0.0)
+            pk = getattr(self, "_diag_packets", 0)
+            diag = f" · rd {rd:.0f}ms/{pk}pk · ms {ms:.0f}ms"
         self._lbl_metrics.setText(
-            f"{decoded.srate/1e6:.3f} MSa/s · {trig} · {len(decoded.channels)} ch{fps}"
+            f"{decoded.srate/1e6:.3f} MSa/s · {trig} · {len(decoded.channels)} ch{fps}{diag}"
         )
 
     @Slot(str)
@@ -612,6 +770,11 @@ class MainWindow(QMainWindow):
         # переприменить стиль после смены objectName
         self._btn_run.setStyleSheet("")
         self.setStyleSheet(self.styleSheet())
+        # бейдж триггера: STOP красный / SINGLE «Ready» cyan; RUN ведут кадры (Trig'd/Auto)
+        if state is RunState.STOPPED:
+            self._plot.set_trigger_badge("Stop", "#E5484D")
+        elif state is RunState.SINGLE:
+            self._plot.set_trigger_badge("Ready", "#23C8E6")
 
     def closeEvent(self, event):
         self._disconnect()

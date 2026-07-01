@@ -13,9 +13,8 @@ from PySide6.QtWidgets import (
 )
 
 from hantek_dso2d15.gui.widgets import DecimalSpinBox
-
-# Цветокод каналов (как в plot_widget)
-CH_COLORS = {1: "#F2C300", 2: "#3FE03F"}
+from hantek_dso2d15.gui.theme import CH_COLORS, rgba
+from hantek_dso2d15.gui.segmented import SegmentedControl
 
 # Стандартная последовательность V/дел (1-2-5), В
 VDIV_VALUES = [
@@ -41,8 +40,8 @@ class _ChannelCard(QFrame):
         color = CH_COLORS.get(n, "#C5C9D1")
         self.setObjectName(f"chcard{n}")
         self.setStyleSheet(
-            f"#chcard{n} {{ border: 1px solid {color}55; border-radius: 6px; "
-            f"background: {color}11; }}"
+            f"#chcard{n} {{ border: 1px solid {rgba(color, 0.35)}; border-radius: 6px; "
+            f"background: {rgba(color, 0.07)}; }}"
             f"QLabel {{ color: #9AA0AC; }}"
         )
         lay = QGridLayout(self)
@@ -83,11 +82,10 @@ class _ChannelCard(QFrame):
         )
         lay.addWidget(self._offset, 2, 1)
 
-        # связь
+        # связь (segmented DC/AC/GND, акцент — цвет канала)
         lay.addWidget(QLabel("Связь"), 3, 0)
-        self._coupling = QComboBox()
-        self._coupling.addItems(COUPLINGS)
-        self._coupling.currentTextChanged.connect(
+        self._coupling = SegmentedControl(list(COUPLINGS), accent=color)
+        self._coupling.valueChanged.connect(
             lambda s: self.changed.emit(self._n, "coupling", s)
         )
         lay.addWidget(self._coupling, 3, 1)
@@ -147,7 +145,7 @@ class _ChannelCard(QFrame):
             self._rebuild_scale(probe, float(ch.scale))
             self._apply_offset_step(float(ch.scale))
             self._offset.setValue(float(ch.offset))
-            self._coupling.setCurrentText(str(ch.coupling))
+            self._coupling.set_value(str(ch.coupling))
             self._bw.setChecked(bool(ch.bwlimit))
             self._inv.setChecked(bool(ch.invert))
         finally:

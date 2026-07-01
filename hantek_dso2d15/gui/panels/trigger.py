@@ -12,6 +12,8 @@ from PySide6.QtWidgets import (
 )
 
 from hantek_dso2d15.gui.widgets import DecimalSpinBox
+from hantek_dso2d15.gui.segmented import SegmentedControl
+from hantek_dso2d15.gui.theme import WARN_AMBER
 from hantek_dso2d15.scpi.trigger import Trigger, TriggerEdge
 
 # Только каналы, доступные в типовой конфигурации DSO2D15 (2-канальный прибор + EXT)
@@ -54,21 +56,21 @@ class TriggerPanel(QWidget):
         )
         lay.addWidget(self._source, 1, 1)
 
-        # ---- Развёртка ----------------------------------------------------
+        # ---- Развёртка (segmented) ----------------------------------------
         lay.addWidget(QLabel("Развёртка"), 2, 0)
-        self._sweep = QComboBox()
-        self._sweep.addItems(list(Trigger.SWEEPS))
-        self._sweep.currentTextChanged.connect(
-            lambda s: self.settingChanged.emit("trigger.sweep", s)
+        self._sweep = SegmentedControl(
+            [("Auto", "AUTO"), ("Normal", "NORMal"), ("Single", "SINGle")], accent=WARN_AMBER)
+        self._sweep.valueChanged.connect(
+            lambda v: self.settingChanged.emit("trigger.sweep", v)
         )
         lay.addWidget(self._sweep, 2, 1)
 
-        # ---- Фронт (edge) -------------------------------------------------
+        # ---- Фронт (segmented) --------------------------------------------
         lay.addWidget(QLabel("Фронт"), 3, 0)
-        self._slope = QComboBox()
-        self._slope.addItems(list(TriggerEdge.SLOPES))
-        self._slope.currentTextChanged.connect(
-            lambda s: self.settingChanged.emit("trigger.edge.slope", s)
+        self._slope = SegmentedControl(
+            [("Rising", "RISIng"), ("Falling", "FALLing"), ("Either", "EITHer")])
+        self._slope.valueChanged.connect(
+            lambda v: self.settingChanged.emit("trigger.edge.slope", v)
         )
         lay.addWidget(self._slope, 3, 1)
 
@@ -99,6 +101,14 @@ class TriggerPanel(QWidget):
             self._slope, self._level, self._holdoff,
         ]
 
+    def update_level(self, volts: float) -> None:
+        """Синхронизировать спинбокс уровня (напр. после drag на графике), без эмиссии."""
+        blocked = self._level.blockSignals(True)
+        try:
+            self._level.setValue(float(volts))
+        finally:
+            self._level.blockSignals(blocked)
+
     def load_from_scope(self, scope) -> None:
         """Загрузить текущие значения триггера с прибора (сигналы заблокированы)."""
         for w in self._all_widgets:
@@ -106,8 +116,8 @@ class TriggerPanel(QWidget):
         try:
             self._mode.setCurrentText(str(scope.trigger.mode))
             self._source.setCurrentText(str(scope.trigger.edge.source))
-            self._sweep.setCurrentText(str(scope.trigger.sweep))
-            self._slope.setCurrentText(str(scope.trigger.edge.slope))
+            self._sweep.set_value(str(scope.trigger.sweep))
+            self._slope.set_value(str(scope.trigger.edge.slope))
             self._level.setValue(float(scope.trigger.edge.level))
             self._holdoff.setValue(float(scope.trigger.holdoff))
         finally:

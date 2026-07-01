@@ -18,6 +18,7 @@ from PySide6.QtWidgets import (
 )
 
 from hantek_dso2d15.gui.widgets import DecimalSpinBox
+from hantek_dso2d15.gui.waveform_tiles import WaveformPicker
 
 
 class GeneratorPanel(QWidget):
@@ -86,13 +87,16 @@ class GeneratorPanel(QWidget):
         main_grid.addWidget(self._output, row, 0, 1, 2)
         row += 1
 
-        # Тип волны
-        main_grid.addWidget(QLabel("Тип"), row, 0)
-        self._type = QComboBox()
-        for literal in self.TYPES:
-            self._type.addItem(self._TYPE_LABELS.get(literal, literal), literal)
-        self._type.currentIndexChanged.connect(self._on_type_changed)
-        main_grid.addWidget(self._type, row, 1)
+        # Тип волны — плитки с глифами форм (полная ширина)
+        main_grid.addWidget(QLabel("Тип"), row, 0, 1, 2)
+        row += 1
+        self._type = WaveformPicker(
+            [(v, self._TYPE_LABELS.get(v, v)) for v in self.TYPES], columns=5
+        )
+        self._type.valueChanged.connect(
+            lambda v: self.settingChanged.emit("dds.type", v)
+        )
+        main_grid.addWidget(self._type, row, 0, 1, 2)
         row += 1
 
         # Частота
@@ -248,11 +252,6 @@ class GeneratorPanel(QWidget):
     # Внутренние обработчики
     # ------------------------------------------------------------------
 
-    def _on_type_changed(self, _index: int) -> None:
-        data = self._type.currentData()
-        if data is not None:
-            self.settingChanged.emit("dds.type", data)
-
     def _on_mod_type_changed(self, _index: int) -> None:
         data = self._mod_type.currentData()
         if data is not None:
@@ -294,9 +293,7 @@ class GeneratorPanel(QWidget):
             # Основные
             self._output.setChecked(bool(dds.output))
 
-            idx = self._type.findData(str(dds.type))
-            if idx >= 0:
-                self._type.setCurrentIndex(idx)
+            self._type.set_value(str(dds.type))
 
             self._freq.setValue(float(dds.freq))
             self._amplitude.setValue(float(dds.amplitude))

@@ -33,6 +33,7 @@ from hantek_dso2d15.gui.panels.measure import MeasurePanel
 from hantek_dso2d15.gui.panels.math import MathPanel
 from hantek_dso2d15.gui.panels.cursors import CursorsPanel
 from hantek_dso2d15.gui.panels.display import DisplayPanel
+from hantek_dso2d15.gui.panels.decode import DecodePanel
 from hantek_dso2d15.gui.panels.generator import GeneratorPanel
 from hantek_dso2d15.gui.panels.sweep import SweepPanel
 from hantek_dso2d15.gui.scpi_terminal import ScpiTerminal
@@ -162,6 +163,7 @@ class MainWindow(QMainWindow):
         self._math = MathPanel()
         self._cursors = CursorsPanel()
         self._display = DisplayPanel()
+        self._decode = DecodePanel()
         self._generator = GeneratorPanel()
         self._sweep = SweepPanel()
         self._sweep.set_folder(os.path.abspath("captures"))
@@ -172,7 +174,7 @@ class MainWindow(QMainWindow):
                         self._generator]
         # Клиентские панели (Math/Cursors/Display) работают с НАШИМ графиком, а не с
         # прибором — проводка в __init__ (ниже), активны всегда.
-        self._client_panels = [self._math, self._cursors, self._display]
+        self._client_panels = [self._math, self._cursors, self._display, self._decode]
 
         # аккордеон: естественная укладка по контенту. Развёрнутая секция занимает
         # ровно свою высоту, свёрнутая — высоту шапки; нижняя растяжка поглощает
@@ -191,6 +193,7 @@ class MainWindow(QMainWindow):
                 ("acquire", "ACQUIRE", self._acquire, False),
                 ("math", "MATH / FFT", self._math, False),
                 ("cursors", "КУРСОРЫ", self._cursors, False),
+                ("decode", "ДЕКОД ШИН", self._decode, False),
                 ("display", "ДИСПЛЕЙ", self._display, False)):
             if panel in self._panels or panel is self._measure:
                 panel.setEnabled(False)  # device-панели включаются при connect
@@ -208,6 +211,7 @@ class MainWindow(QMainWindow):
         # summary-чипы в заголовках секций (как в макете: счётчик/акцент справа)
         self._measure.measurementsChanged.connect(self._on_measure_summary)
         self._math.mathConfigChanged.connect(self._on_math_summary)
+        self._decode.decodeConfigChanged.connect(self._plot.set_decode_config)
         self._cursors.cursorModeChanged.connect(self._plot.cursors.set_mode)
         self._cursors.cursorSourceChanged.connect(self._plot.cursors.set_source)
         self._plot.cursors.valuesChanged.connect(self._cursors.update_readout)

@@ -20,6 +20,7 @@ from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QLabel
 
 from hantek_dso2d15.gui.cursor_overlay import CursorOverlay
+from hantek_dso2d15.gui.decode_overlay import DecodeOverlay
 from hantek_dso2d15.gui.theme import (
     CH_COLORS, MATH as MATH_COLOR, GRATICULE_BG, CURSOR,
     OK_GREEN, ERR_RED, WARN_AMBER,
@@ -142,6 +143,10 @@ class ScopePlot(QWidget):
         # оверлей курсоров (привязка панели — в main_window)
         self.cursors = CursorOverlay(self._pi)
         self.cursors.valuesChanged.connect(self._on_cursor_values)
+
+        # оверлей декодера шин (символы поверх осциллограммы; декод — из сэмплов окна)
+        self._decode_overlay = DecodeOverlay(self._pi)
+        self._decode_config: dict | None = None
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -296,6 +301,87 @@ class ScopePlot(QWidget):
     def set_math_config(self, config: dict) -> None:
         self._math_config = config
 
+    # ------------------------------------------------------------------
+    # Decode API (декодирование шин из сэмплов окна — клиентское)
+    # ------------------------------------------------------------------
+
+    def set_decode_config(self, config: dict) -> None:
+        self._decode_config = config
+
+    def _render_decode(self, view) -> None:
+        """Декодировать шину из сэмплов видимого окна и нарисовать оверлей символов."""
+        cfg = self._decode_config
+        proto = (cfg or {}).get("protocol", "OFF")
+        t = np.asarray(getattr(view, "time", []), dtype=float)
+        if not cfg or proto == "OFF" or t.size < 2:
+            self._decode_overlay.clear()
+            return
+        t0 = float(t[0])
+        span = float(t[-1] - t[0]) or 1.0
+
+        def _t2x(tv: float) -> float:
+            return (float(tv) - t0) / span * HDIV
+
+        chans = getattr(view, "channels", {})
+        thr = float(cfg.get("threshold", 1.5))
+        items: list[dict] = []
+        try:
+            if proto == "UART":
+                from hantek_dso2d15.waveform.decode_uart import decode_uart
+                u = cfg.get("uart", {})
+                src = chans.get(int(u.get("source", 1)))
+                if src is None:
+                    self._decode_overlay.clear()
+                    return
+                syms = decode_uart(
+                    t, src, threshold=thr, baud=float(u.get("baud", 9600)),
+                    bits=int(u.get("bits", 8)), parity=str(u.get("parity", "NONE")),
+                    stop_bits=int(u.get("stop_bits", 1)),
+                    lsb_first=bool(u.get("lsb_first", True)))
+                for s in syms:
+                    col = ERR_RED if s.error else OK_GREEN
+                    lbl = f"{s.value:02X}" + ("!" if s.error else "")
+                    items.append({"x0": _t2x(s.start), "x1": _t2x(s.end), "label": lbl, "color": col})
+            elif proto == "SPI":
+                from hantek_dso2d15.waveform.decode_spi import decode_spi
+                sp = cfg.get("spi", {})
+                sclk = chans.get(int(sp.get("sclk", 1)))
+                data = chans.get(int(sp.get("data", 2)))
+                if sclk is None or data is None:
+                    self._decode_overlay.clear()
+                    return
+                words = decode_spi(
+                    t, sclk, data, threshold=thr,
+                    clock_edge=str(sp.get("clock_edge", "Rising")),
+                    bits=int(sp.get("bits", 8)), msb_first=bool(sp.get("msb_first", True)))
+                for w in words:
+                    items.append({"x0": _t2x(w.start), "x1": _t2x(w.end),
+                                  "label": f"{w.value:X}", "color": OK_GREEN})
+            elif proto == "I2C":
+                from hantek_dso2d15.waveform.decode_i2c import decode_i2c
+                ic = cfg.get("i2c", {})
+                sda = chans.get(int(ic.get("sda", 1)))
+                scl = chans.get(int(ic.get("scl", 2)))
+                if sda is None or scl is None:
+                    self._decode_overlay.clear()
+                    return
+                for s in decode_i2c(t, sda, scl, threshold=thr):
+                    if s.kind == "start":
+                        items.append({"x0": _t2x(s.start), "x1": _t2x(s.start) + 0.4,
+                                      "label": "S", "color": WARN_AMBER})
+                    elif s.kind == "stop":
+                        items.append({"x0": _t2x(s.start) - 0.4, "x1": _t2x(s.start),
+                                      "label": "P", "color": WARN_AMBER})
+                    else:  # address / data
+                        col = OK_GREEN if s.ack else ERR_RED
+                        pfx = "" if s.kind == "data" else "@"
+                        items.append({"x0": _t2x(s.start), "x1": _t2x(s.end),
+                                      "label": f"{pfx}{s.value:02X}", "color": col})
+        except Exception:  # noqa: BLE001 — битый конфиг/кадр не должен ронять рендер
+            self._decode_overlay.clear()
+            return
+        self._decode_overlay.render(items)
+
     def _render_math(self, decoded) -> None:
         cfg = self._math_config
         if not cfg or not cfg.get("display"):
@@ -373,6 +459,7 @@ class ScopePlot(QWidget):
 
         self._render_math(view)
         self.cursors.update_frame(view)
+        self._render_decode(view)
         self._update_trigger_markers(decoded)
         self._update_readout(view)
         if decoded.triggered:
